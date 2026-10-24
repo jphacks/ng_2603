@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -24,19 +22,24 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.R
+import com.example.myapplication.data.repository.ScreenTimeRepositoryImpl
+import com.example.myapplication.data.repository.SettingsRepositoryImpl
 import com.example.myapplication.domain.model.AvatarExpression
 import com.example.myapplication.domain.model.DisappointmentLevel
 import com.example.myapplication.ui.components.OkanTopBar
@@ -58,9 +61,24 @@ fun HomeScreen(
     durationMinutes: Int = 30,
     onPrepareMonitoringClick: () -> Unit,
     onStopMonitoringClick: () -> Unit,
-    onQrClick: () -> Unit = {}
+    onResetStatusClick: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val settingsRepo = remember { SettingsRepositoryImpl(context) }
+    val screenTimeRepo = remember { ScreenTimeRepositoryImpl(context, settingsRepo) }
+
     var showStopDialog by remember { mutableStateOf(false) }
+    var todayScreenTimeMillis by remember { mutableLongStateOf(0L) }
+
+    // 本日のスクリーンタイム取得
+    LaunchedEffect(Unit) {
+        val list = screenTimeRepo.getTodayAppUsageList()
+        val total = list.sumOf { it.usedTimeMillis }
+        todayScreenTimeMillis = total
+    }
+
+    val screenTimeHours = todayScreenTimeMillis / (1000 * 60 * 60)
+    val screenTimeMinutes = (todayScreenTimeMillis % (1000 * 60 * 60)) / (1000 * 60)
 
     Column(
         modifier = Modifier
@@ -75,7 +93,7 @@ fun HomeScreen(
                 userRole == UserRole.CHILD -> "おかん通知（こども）"
                 else -> "おかん通知"
             },
-            onMoreClick = onQrClick
+            onResetStatusClick = onResetStatusClick
         )
 
         if (!isMonitoring) {
@@ -115,9 +133,9 @@ fun HomeScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                // 中央の大きな状態カード（Figma画面2）
+                // 中央の大きな状態カード（待機中 ＆ スクリーンタイム表示）
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
@@ -135,10 +153,10 @@ fun HomeScreen(
                         ParentAvatarView(
                             expression = AvatarExpression.SMILE,
                             level = DisappointmentLevel.LEVEL_0_SERENE,
-                            modifier = Modifier.size(120.dp)
+                            modifier = Modifier.size(115.dp)
                         )
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
                             text = "見守り待機中",
@@ -147,31 +165,48 @@ fun HomeScreen(
                             color = OkanTextPrimary
                         )
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // スクリーンタイム表示バッジ
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(OkanSurface)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = "今日のスクリーンタイム: ${screenTimeHours}時間${screenTimeMinutes}分",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = OkanPrimary
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
                             text = if (userRole == UserRole.PARENT) {
-                                "連携端末: お子様のスマホ 連携完了"
+                                "連携端末: お子様のスマホと連携中"
                             } else {
                                 "使いすぎると親がだんだん呆れていきます。\n準備ができたら見守りを開始しましょう！"
                             },
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Normal,
                             color = OkanTextSecondary,
                             textAlign = TextAlign.Center,
-                            lineHeight = 18.sp
+                            lineHeight = 17.sp
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 // 「見守り開始準備」ボタン
                 Button(
                     onClick = onPrepareMonitoringClick,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp),
+                        .height(54.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = OkanPrimary,
@@ -186,12 +221,12 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(
                         text = "見守り開始準備",
-                        fontSize = 18.sp,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
             }
         } else {
             // 見守り実行中 / 警告状態（子供アカウント遷移先 or 見守り開始時）
@@ -218,16 +253,16 @@ fun HomeScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // おかんイラスト
                 Image(
                     painter = painterResource(id = R.drawable.okan_angry),
                     contentDescription = "怒るお母さん",
-                    modifier = Modifier.size(220.dp)
+                    modifier = Modifier.size(210.dp)
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // 赤い強制停止ボタン
                 Button(
@@ -240,7 +275,7 @@ fun HomeScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth(0.85f)
-                        .height(50.dp),
+                        .height(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = OkanDanger,
@@ -249,12 +284,12 @@ fun HomeScreen(
                 ) {
                     Text(
                         text = "強制停止ボタン",
-                        fontSize = 17.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // メッセージボックス
                 Box(
@@ -264,7 +299,7 @@ fun HomeScreen(
                         .weight(1f)
                         .clip(RoundedCornerShape(18.dp))
                         .background(OkanCardGray)
-                        .padding(vertical = 20.dp, horizontal = 20.dp)
+                        .padding(vertical = 16.dp, horizontal = 20.dp)
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -272,23 +307,23 @@ fun HomeScreen(
                     ) {
                         Text(
                             text = "見守ります！！",
-                            fontSize = 24.sp,
+                            fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             color = OkanTextPrimary
                         )
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
                             text = "余計なアプリ見ちゃ\nだめよ！！",
-                            fontSize = 22.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             color = OkanTextPrimary,
                             textAlign = TextAlign.Center,
-                            lineHeight = 30.sp
+                            lineHeight = 28.sp
                         )
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
                             text = "設定制限時間: ${durationMinutes}分",
@@ -299,7 +334,7 @@ fun HomeScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }

@@ -22,8 +22,8 @@ import kotlinx.coroutines.launch
 
 /**
  * バックグラウンド常時実行・アプリ監視サービス
- * このアプリ以外のアプリ（YouTube, SNS, ゲーム, ブラウザ等）を開いたときに
- * お母さんからの小言・警告通知を自動的に送信する。
+ * - 制限時間が過ぎるまでは通知を送らない
+ * - 制限時間経過後に、このアプリ以外のアプリ（YouTube, SNS, ゲーム等）を開いたときにお母さんからの小言・警告通知を送信する
  */
 class AppMonitoringService : Service() {
 
@@ -74,8 +74,26 @@ class AppMonitoringService : Service() {
                         continue
                     }
 
+                    val now = System.currentTimeMillis()
+                    val startTime = settingsRepository.monitoringStartTimeFlow.first()
+                    val limitMillis = settingsRepository.limitTimeMillisFlow.first()
+
+                    // 経過時間の計算
+                    val elapsed = now - startTime
+
+                    // ★重要仕様: 制限時間が過ぎるまでは通知を送らない！時間経過後に送る
+                    val isLimitExceeded = (startTime > 0 && elapsed >= limitMillis)
+
+                    if (!isLimitExceeded) {
+                        // 制限時間内は通知を送らずに見守りを継続
+                        delay(2000L)
+                        continue
+                    }
+
+                    // 制限時間を過ぎた！フォアグラウンドアプリをチェック
                     val currentForegroundApp = screenTimeRepository.getCurrentForegroundPackage()
-                    val customProhibition = settingsRepository.customMessageFlow.first() ?: "スマホいじっちゃダメ！"
+                    val customProhibition = settingsRepository.customMessageFlow.first() ?: "料理中にスマホいじっちゃダメ！"
+                    val limitMinutes = (limitMillis / (60 * 1000)).toInt()
 
                     // 自アプリおよびホーム画面（ランチャー）以外を開いた場合を「他のアプリを開いた」と判定
                     val isOtherAppRunning = currentForegroundApp != null &&
@@ -84,12 +102,11 @@ class AppMonitoringService : Service() {
                             !currentForegroundApp.contains("launcher", ignoreCase = true)
 
                     if (isOtherAppRunning) {
-                        val now = System.currentTimeMillis()
                         val appName = getAppName(currentForegroundApp!!)
 
-                        // 他のアプリに切り替わった瞬間、または前回の通知から10秒以上経過している場合に発火
+                        // 他のアプリに切り替わった瞬間、または前回の通知から15秒以上経過している場合に発火
                         val shouldNotify = (currentForegroundApp != lastNotifiedPackage) ||
-                                (now - lastNotificationTime >= 10000L)
+                                (now - lastNotificationTime >= 15000L)
 
                         if (shouldNotify) {
                             lastNotifiedPackage = currentForegroundApp
@@ -99,6 +116,7 @@ class AppMonitoringService : Service() {
                             sendOkanWarningNotification(
                                 appName = appName,
                                 prohibition = customProhibition,
+                                limitMinutes = limitMinutes,
                                 violationCount = currentViolationCount
                             )
                         }
@@ -118,39 +136,33 @@ class AppMonitoringService : Service() {
     }
 
     /**
-     * お母さん（おかん）らしい説教・小言の通知を送信
+     * 制限時間経過後のお母さん（おかん）らしい説教・小言の通知を送信
      */
     private fun sendOkanWarningNotification(
         appName: String,
         prohibition: String,
+        limitMinutes: Int,
         violationCount: Int
     ) {
         val (quote, subQuote, level) = when {
             violationCount <= 1 -> {
                 Triple(
-                    "こら！「$appName」開いてるでしょ！",
-                    "「$prohibition」って約束したやろ！今すぐスマホ置きなさい！",
-                    DisappointmentLevel.LEVEL_1_SUSPICIOUS
+                    "約束の${limitMinutes}分過ぎたよ！「$appName」閉めなさい！",
+                    "「$prohibition」って言ったでしょ！時間過ぎてるよ！",
+                    DisappointmentLevel.LEVEL_2_SIGHING
                 )
             }
             violationCount <= 3 -> {
                 Triple(
                     "まだ「$appName」見てんの！？",
-                    "お母さん全部見てるんやからね！約束の時間まで我慢しなさい！",
-                    DisappointmentLevel.LEVEL_2_SIGHING
-                )
-            }
-            violationCount <= 5 -> {
-                Triple(
-                    "いい加減にしなさい！！",
-                    "「$prohibition」って言ったのに何回開く気！？スマホ没収するよ！",
+                    "制限時間はとっくに過ぎてるんやからね！今すぐスマホを置きなさい！",
                     DisappointmentLevel.LEVEL_3_ANNOYED
                 )
             }
             else -> {
                 Triple(
-                    "………………（激怒）",
-                    "もう何も言いません。今すぐ現実に戻りなさい！！",
+                    "いい加減にしなさい！！（激怒）",
+                    "もう何も言いません。今すぐ現実に戻りなさい！！スマホ没収するよ！",
                     DisappointmentLevel.LEVEL_4_COLD_STARE
                 )
             }

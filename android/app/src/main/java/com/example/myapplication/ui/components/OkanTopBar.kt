@@ -11,14 +11,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,8 +33,10 @@ fun OkanTopBar(
     title: String = "おかん通知",
     canNavigateBack: Boolean = false,
     onBackClick: () -> Unit = {},
-    onMoreClick: () -> Unit = {}
+    onResetStatusClick: () -> Unit = {}
 ) {
+    var isMenuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -64,15 +70,34 @@ fun OkanTopBar(
             )
         }
 
-        IconButton(
-            onClick = onMoreClick,
-            modifier = Modifier.size(32.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.MoreVert,
-                contentDescription = "その他メニュー",
-                tint = OkanTextPrimary
-            )
+        Box {
+            IconButton(
+                onClick = { isMenuExpanded = true },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "メニュー",
+                    tint = OkanTextPrimary
+                )
+            }
+
+            DropdownMenu(
+                expanded = isMenuExpanded,
+                onDismissRequest = { isMenuExpanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("ステータスを再設定") },
+                    onClick = {
+                        isMenuExpanded = false
+                        onResetStatusClick()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("閉じる") },
+                    onClick = { isMenuExpanded = false }
+                )
+            }
         }
     }
 }

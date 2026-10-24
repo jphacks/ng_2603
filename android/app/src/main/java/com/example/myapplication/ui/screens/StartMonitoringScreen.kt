@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -21,11 +20,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -54,13 +51,16 @@ import com.example.myapplication.ui.theme.OkanTextSecondary
 
 @Composable
 fun StartMonitoringScreen(
+    initialProhibition: String = "料理中にスマホいじっちゃダメ！",
+    initialMinutes: Int = 30,
+    initialPersonality: OkanPersonality = OkanPersonality.STANDARD,
     onStartMonitoringClick: (prohibition: String, minutes: Int, personality: OkanPersonality) -> Unit,
     onBackClick: () -> Unit
 ) {
-    var prohibitionText by remember { mutableStateOf("料理中にスマホいじっちゃダメ！") }
-    var selectedHour by remember { mutableIntStateOf(0) }
-    var selectedMinute by remember { mutableIntStateOf(30) }
-    var selectedPersonality by remember { mutableStateOf(OkanPersonality.STANDARD) }
+    var prohibitionText by remember { mutableStateOf(initialProhibition) }
+    var selectedHour by remember { mutableIntStateOf(initialMinutes / 60) }
+    var selectedMinute by remember { mutableIntStateOf(initialMinutes % 60) }
+    var selectedPersonality by remember { mutableStateOf(initialPersonality) }
 
     val scrollState = rememberScrollState()
 
@@ -76,11 +76,10 @@ fun StartMonitoringScreen(
             onBackClick = onBackClick
         )
 
-        // スクロール可能なフォーム領域（weight(1f) で画面下部ボタンと分離）
+        // スクロール可能な全体領域（メニューバーが下にある状態で快適にスクロール可能）
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
+                .fillMaxSize()
                 .verticalScroll(scrollState)
                 .padding(horizontal = 24.dp)
         ) {
@@ -206,48 +205,38 @@ fun StartMonitoringScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-        }
+            Spacer(modifier = Modifier.height(28.dp))
 
-        // 画面下部に常に固定される「見守り開始」ボタンエリア（絶対に隠れない）
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = OkanSurface,
-            shadowElevation = 8.dp
-        ) {
-            Column(
+            // 見守り開始ボタン（フォーム内に配置し、下に十分な余白を確保）
+            Button(
+                onClick = {
+                    val totalMinutes = (selectedHour * 60 + selectedMinute).coerceAtLeast(1)
+                    onStartMonitoringClick(prohibitionText, totalMinutes, selectedPersonality)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 12.dp)
+                    .height(54.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = OkanPrimary,
+                    contentColor = Color.White
+                )
             ) {
-                Button(
-                    onClick = {
-                        val totalMinutes = (selectedHour * 60 + selectedMinute).coerceAtLeast(1)
-                        onStartMonitoringClick(prohibitionText, totalMinutes, selectedPersonality)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = OkanPrimary,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text(
-                        text = "見守り開始",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = "見守り開始",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
+
+            // メニューバーの上に被らない十分な下部余白
+            Spacer(modifier = Modifier.height(36.dp))
         }
     }
 }

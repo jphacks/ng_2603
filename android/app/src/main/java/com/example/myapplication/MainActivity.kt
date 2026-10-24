@@ -27,6 +27,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -65,6 +66,7 @@ import com.example.myapplication.ui.screens.SoundSettingsScreen
 import com.example.myapplication.ui.screens.StartMonitoringScreen
 import com.example.myapplication.ui.screens.WelcomeScreen
 import com.example.myapplication.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -89,17 +91,69 @@ fun OkanApp() {
     val screenTimeRepository = remember { ScreenTimeRepositoryImpl(context, settingsRepository) }
     val notificationHelper = remember { NotificationHelper(context) }
 
-    var currentScreen by remember { mutableStateOf(Screen.WELCOME) }
+    // 画面・状態の永続化用 SharedPreferences
+    val appStatePrefs = remember {
+        context.getSharedPreferences("okan_app_ui_state", Context.MODE_PRIVATE)
+    }
+
+    // 永続化から復元
+    val savedScreenName = appStatePrefs.getString("saved_screen", Screen.WELCOME.name)
+    val initialScreen = try { Screen.valueOf(savedScreenName ?: Screen.WELCOME.name) } catch (_: Exception) { Screen.WELCOME }
+
+    val savedRoleName = appStatePrefs.getString("saved_role", UserRole.INDIVIDUAL.name)
+    val initialRole = try { UserRole.valueOf(savedRoleName ?: UserRole.INDIVIDUAL.name) } catch (_: Exception) { UserRole.INDIVIDUAL }
+
+    val savedPersonalityName = appStatePrefs.getString("saved_personality", OkanPersonality.STANDARD.name)
+    val initialPersonality = try { OkanPersonality.valueOf(savedPersonalityName ?: OkanPersonality.STANDARD.name) } catch (_: Exception) { OkanPersonality.STANDARD }
+
+    var currentScreen by remember { mutableStateOf(initialScreen) }
     var currentTab by remember { mutableStateOf(TabItem.HOME) }
-    var isMonitoring by remember { mutableStateOf(false) }
-    var userRole by remember { mutableStateOf(UserRole.INDIVIDUAL) }
+    var isMonitoring by remember { mutableStateOf(appStatePrefs.getBoolean("is_monitoring", false)) }
+    var userRole by remember { mutableStateOf(initialRole) }
 
-    // アプリの状態
-    var currentProhibition by remember { mutableStateOf("料理中にスマホいじっちゃダメ！") }
-    var currentDurationMinutes by remember { mutableIntStateOf(30) }
-    var currentPersonality by remember { mutableStateOf(OkanPersonality.STANDARD) }
+    var currentProhibition by remember {
+        mutableStateOf(appStatePrefs.getString("current_prohibition", "料理中にスマホいじっちゃダメ！") ?: "料理中にスマホいじっちゃダメ！")
+    }
+    var currentDurationMinutes by remember {
+        mutableIntStateOf(appStatePrefs.getInt("duration_minutes", 30))
+    }
+    var currentPersonality by remember { mutableStateOf(initialPersonality) }
+    var monitoringStartTime by remember {
+        mutableLongStateOf(appStatePrefs.getLong("monitoring_start_time", 0L))
+    }
 
-    // 権限ダイアログの表示管理
+    // 状態が変化するたびに永続化保存（アプリが落とされても画面・状態を完全維持）
+    fun saveUiState() {
+        appStatePrefs.edit()
+            .putString("saved_screen", currentScreen.name)
+            .putString("saved_role", userRole.name)
+            .putString("saved_personality", currentPersonality.name)
+            .putBoolean("is_monitoring", isMonitoring)
+            .putString("current_prohibition", currentProhibition)
+            .putInt("duration_minutes", currentDurationMinutes)
+            .putLong("monitoring_start_time", monitoringStartTime)
+            .apply()
+    }
+
+    LaunchedEffect(currentScreen, isMonitoring, userRole, currentProhibition, currentDurationMinutes, currentPersonality, monitoringStartTime) {
+        saveUiState()
+    }
+
+    // 起動時に親の設定があれば読み込んで反映
+    LaunchedEffect(Unit) {
+        val savedLimit = settingsRepository.limitTimeMillisFlow.first()
+        if (savedLimit > 0) {
+            currentDurationMinutes = (savedLimit / (60 * 1000)).toInt()
+        }
+        val savedMsg = settingsRepository.customMessageFlow.first()
+        if (!savedMsg.isNullOrBlank()) {
+            currentProhibition = savedMsg
+        }
+        val savedActive = settingsRepository.isMonitoringActiveFlow.first()
+        isMonitoring = savedActive
+        monitoringStartTime = settingsRepository.monitoringStartTimeFlow.first()
+    }
+
     var showUsagePermissionDialog by remember { mutableStateOf(false) }
 
     // 通知権限リクエストランチャー (Android 13+)
@@ -116,26 +170,33 @@ fun OkanApp() {
         }
     }
 
-    // アプリがバックグラウンドに回った瞬間（他アプリやホームを開いたとき）の即時おかん通知
-    DisposableEffect(lifecycleOwner, isMonitoring, currentProhibition) {
+    // アプリがバックグラウンドに移動した際のフォールバック通知
+    // ★重要仕様: 制限時間が過ぎるまでは通知を送らない！経過後にのみ通知
+    DisposableEffect(lifecycleOwner, isMonitoring, currentProhibition, monitoringStartTime, currentDurationMinutes) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && isMonitoring) {
-                // 他のアプリを開いたと検知！即座にお母さん通知を発火
-                val quote = when (currentPersonality) {
-                    OkanPersonality.SWEET -> "もう、スマホ置いてやるべきこと頑張って〜！"
-                    OkanPersonality.STRICT -> "こら！！今すぐスマホを置きなさい！！"
-                    OkanPersonality.STANDARD -> "こら！「$currentProhibition」って約束したでしょ！"
+                val now = System.currentTimeMillis()
+                val limitMillis = currentDurationMinutes * 60 * 1000L
+                val elapsed = now - monitoringStartTime
+
+                // 制限時間を過ぎている場合のみ通知！
+                if (monitoringStartTime > 0 && elapsed >= limitMillis) {
+                    val quote = when (currentPersonality) {
+                        OkanPersonality.SWEET -> "約束の${currentDurationMinutes}分過ぎたよ！がんばってスマホ置いてね？"
+                        OkanPersonality.STRICT -> "約束の${currentDurationMinutes}分過ぎてる！！今すぐ画面を閉じなさい！！"
+                        OkanPersonality.STANDARD -> "約束の${currentDurationMinutes}分過ぎたよ！「$currentProhibition」って言ったでしょ！"
+                    }
+                    notificationHelper.showDisappointmentNotification(
+                        message = DisappointmentMessage(
+                            level = DisappointmentLevel.LEVEL_3_ANNOYED,
+                            mainQuote = quote,
+                            subQuote = "制限時間はとっくに終了しました！スマホを置きなさい！",
+                            expression = AvatarExpression.GLARE
+                        ),
+                        appName = "スマートフォン",
+                        enableVibration = true
+                    )
                 }
-                notificationHelper.showDisappointmentNotification(
-                    message = DisappointmentMessage(
-                        level = DisappointmentLevel.LEVEL_2_SIGHING,
-                        mainQuote = quote,
-                        subQuote = "お母さん全部お見通しなんやからね！約束の時間まで我慢しなさい！",
-                        expression = AvatarExpression.GLARE
-                    ),
-                    appName = "スマートフォン",
-                    enableVibration = true
-                )
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -145,16 +206,21 @@ fun OkanApp() {
     }
 
     // 見守り開始ヘルパー関数
-    fun startMonitoringService(prohibition: String, minutes: Int, personality: OkanPersonality) {
+    fun startMonitoring(prohibition: String, minutes: Int, personality: OkanPersonality) {
+        val now = System.currentTimeMillis()
         currentProhibition = prohibition
         currentDurationMinutes = minutes
         currentPersonality = personality
         isMonitoring = true
+        monitoringStartTime = now
+        saveUiState()
 
         coroutineScope.launch {
             settingsRepository.setMonitoringActive(true)
             settingsRepository.setCustomMessage(prohibition)
             settingsRepository.setLimitTimeMillis(minutes * 60 * 1000L)
+            settingsRepository.setMonitoringStartTime(now)
+            settingsRepository.setPersonality(personality.name)
             settingsRepository.setUserRole(
                 when (userRole) {
                     UserRole.INDIVIDUAL -> com.example.myapplication.domain.model.UserRole.INDIVIDUAL
@@ -178,10 +244,14 @@ fun OkanApp() {
     }
 
     // 見守り停止ヘルパー関数
-    fun stopMonitoringService() {
+    fun stopMonitoring() {
         isMonitoring = false
+        monitoringStartTime = 0L
+        saveUiState()
+
         coroutineScope.launch {
             settingsRepository.setMonitoringActive(false)
+            settingsRepository.setMonitoringStartTime(0L)
             val intent = Intent(context, AppMonitoringService::class.java)
             context.stopService(intent)
         }
@@ -238,11 +308,10 @@ fun OkanApp() {
         }
     }
 
-    // ボトムバーの表示制御
-    // ウェルカム、QRコード、見守り設定画面、または子供見守り中画面ではボトムバーを非表示にして全画面を活用！
+    // ★重要仕様: 見守り開始設定画面でもメニューバー（BottomBar）を固定表示！
+    // ウェルカム、QRコード、または子供見守り中画面のみ非表示
     val showBottomBar = currentScreen != Screen.WELCOME &&
             currentScreen != Screen.QR_CODE &&
-            currentScreen != Screen.START_MONITORING &&
             !(userRole == UserRole.CHILD && isMonitoring)
 
     Scaffold(
@@ -275,13 +344,11 @@ fun OkanApp() {
                             userRole = role
                             when (role) {
                                 UserRole.INDIVIDUAL -> {
-                                    // 個人管理ならホームにとぶ
                                     isMonitoring = false
                                     currentScreen = Screen.HOME
                                     currentTab = TabItem.HOME
                                 }
                                 UserRole.PARENT, UserRole.CHILD -> {
-                                    // 親またはこどもならQRコード画面へ
                                     currentScreen = Screen.QR_CODE
                                 }
                             }
@@ -298,18 +365,23 @@ fun OkanApp() {
                             currentScreen = Screen.START_MONITORING
                         },
                         onStopMonitoringClick = {
-                            stopMonitoringService()
+                            stopMonitoring()
                         },
-                        onQrClick = {
-                            currentScreen = Screen.QR_CODE
+                        onResetStatusClick = {
+                            // 三点リーダーからのステータス再設定
+                            stopMonitoring()
+                            currentScreen = Screen.WELCOME
                         }
                     )
                 }
 
                 Screen.START_MONITORING -> {
                     StartMonitoringScreen(
+                        initialProhibition = currentProhibition,
+                        initialMinutes = currentDurationMinutes,
+                        initialPersonality = currentPersonality,
                         onStartMonitoringClick = { prohibition, minutes, personality ->
-                            startMonitoringService(prohibition, minutes, personality)
+                            startMonitoring(prohibition, minutes, personality)
                             currentScreen = Screen.HOME
                         },
                         onBackClick = {
@@ -332,16 +404,16 @@ fun OkanApp() {
                         userRole = userRole,
                         onPairingCompleted = {
                             if (userRole == UserRole.PARENT) {
-                                // 親アカウントは、ホーム画面にとぶ
+                                // 親アカウントは設定を共有してホーム画面へ
                                 isMonitoring = false
                                 currentScreen = Screen.HOME
                                 currentTab = TabItem.HOME
                             } else {
-                                // 子供アカウントは、見守り中画面にとぶ
-                                startMonitoringService(
-                                    prohibition = "お母さんとの約束を守ろう！",
-                                    minutes = 30,
-                                    personality = OkanPersonality.STANDARD
+                                // 子供アカウントは親の設定を引き継いで見守り中画面へ
+                                startMonitoring(
+                                    prohibition = currentProhibition,
+                                    minutes = currentDurationMinutes,
+                                    personality = currentPersonality
                                 )
                                 currentScreen = Screen.HOME
                                 currentTab = TabItem.HOME

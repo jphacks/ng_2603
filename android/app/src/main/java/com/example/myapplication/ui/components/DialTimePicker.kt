@@ -1,6 +1,5 @@
 package com.example.myapplication.ui.components
 
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -44,18 +42,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.myapplication.ui.theme.OkanBorder
 import com.example.myapplication.ui.theme.OkanCardGray
 import com.example.myapplication.ui.theme.OkanPrimary
 import com.example.myapplication.ui.theme.OkanPrimaryContainer
 import com.example.myapplication.ui.theme.OkanTextPrimary
 import com.example.myapplication.ui.theme.OkanTextSecondary
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 /**
  * 制限時間セット用のドラムロール・ダイヤルピッカー
- * 時間（0〜23）と分（0〜59）をホイールスクロールまたは上下ボタンでセット可能。
+ * - 「分」が00のときはそれ以上上にスクロール・「^」を押しても反応しない（最小値0で停止）
+ * - 急激な増減や誤動作のない安定したドラムロールスクロール
+ * - クイック選択チップとの正確な連動
  */
 @Composable
 fun DialTimePicker(
@@ -64,9 +64,8 @@ fun DialTimePicker(
     onTimeChanged: (hour: Int, minute: Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val coroutineScope = rememberCoroutineScope()
     val hours = remember { (0..23).toList() }
-    val minutes = remember { (0..59).toList() }
+    val minutes = remember { (0..55 step 5).toList() } // 5分刻み (00, 05, 10 ... 55)
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -76,63 +75,74 @@ fun DialTimePicker(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 8.dp),
+                .padding(vertical = 4.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 時間ダイヤル
-            DialColumnWithControls(
+            // 時間ダイヤル (0〜23時間)
+            WheelDialColumn(
                 label = "時間",
                 values = hours,
                 selectedValue = selectedHour,
                 onValueSelected = { newHour ->
                     onTimeChanged(newHour, selectedMinute)
                 },
+                canStepUp = selectedHour > 0,
+                canStepDown = selectedHour < 23,
                 onStepUp = {
-                    val next = (selectedHour - 1 + 24) % 24
-                    onTimeChanged(next, selectedMinute)
+                    if (selectedHour > 0) {
+                        onTimeChanged(selectedHour - 1, selectedMinute)
+                    }
                 },
                 onStepDown = {
-                    val next = (selectedHour + 1) % 24
-                    onTimeChanged(next, selectedMinute)
+                    if (selectedHour < 23) {
+                        onTimeChanged(selectedHour + 1, selectedMinute)
+                    }
                 }
             )
 
             // 区切りコロン
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(horizontal = 16.dp)
+                modifier = Modifier.padding(horizontal = 14.dp)
             ) {
                 Text(
                     text = ":",
-                    fontSize = 32.sp,
+                    fontSize = 30.sp,
                     fontWeight = FontWeight.Bold,
                     color = OkanTextPrimary
                 )
             }
 
-            // 分ダイヤル
-            DialColumnWithControls(
+            // 分ダイヤル (00〜55分、5分刻み)
+            WheelDialColumn(
                 label = "分",
                 values = minutes,
-                selectedValue = selectedMinute,
+                selectedValue = (selectedMinute / 5 * 5).coerceIn(0, 55),
                 onValueSelected = { newMin ->
                     onTimeChanged(selectedHour, newMin)
                 },
+                canStepUp = selectedMinute > 0, // 00のときはそれ以上上に行かない
+                canStepDown = selectedMinute < 55,
                 onStepUp = {
-                    val next = (selectedMinute - 5 + 60) % 60
-                    onTimeChanged(selectedHour, next)
+                    // 00 のときはそれ以上上に行かない（反応しない）
+                    if (selectedMinute > 0) {
+                        val newMin = (selectedMinute - 5).coerceAtLeast(0)
+                        onTimeChanged(selectedHour, newMin)
+                    }
                 },
                 onStepDown = {
-                    val next = (selectedMinute + 5) % 60
-                    onTimeChanged(selectedHour, next)
+                    if (selectedMinute < 55) {
+                        val newMin = (selectedMinute + 5).coerceAtMost(55)
+                        onTimeChanged(selectedHour, newMin)
+                    }
                 }
             )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // クイックプリセットチップ
+        // クイック選択チップ
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(horizontal = 16.dp)
@@ -164,7 +174,7 @@ fun DialTimePicker(
                         enabled = true,
                         borderColor = if (isSelected) OkanPrimary else Color.Transparent
                     ),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(14.dp)
                 )
             }
         }
@@ -173,90 +183,75 @@ fun DialTimePicker(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DialColumnWithControls(
+private fun WheelDialColumn(
     label: String,
     values: List<Int>,
     selectedValue: Int,
     onValueSelected: (Int) -> Unit,
+    canStepUp: Boolean,
+    canStepDown: Boolean,
     onStepUp: () -> Unit,
     onStepDown: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val itemHeight: Dp = 44.dp
+    val itemHeight: Dp = 40.dp
     val visibleItemsCount = 3
     val totalHeight = itemHeight * visibleItemsCount
 
-    val selectedIndex = values.indexOf(selectedValue).coerceAtLeast(0)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
+    val targetIndex = values.indexOf(selectedValue).coerceIn(0, values.size - 1)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
     val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
     val coroutineScope = rememberCoroutineScope()
 
-    // リストがスクロールされたときに中央のインデックスを監視
-    val centerIndex by remember {
-        derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val visibleItems = layoutInfo.visibleItemsInfo
-            if (visibleItems.isEmpty()) {
-                0
-            } else {
-                val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
-                val closest = visibleItems.minByOrNull { item ->
-                    val itemCenter = item.offset + item.size / 2
-                    kotlin.math.abs(itemCenter - viewportCenter)
-                }
-                closest?.index ?: 0
-            }
-        }
-    }
-
-    // スクロール停止時に値を更新
-    LaunchedEffect(centerIndex) {
-        snapshotFlow { centerIndex }
-            .distinctUntilChanged()
-            .collect { idx ->
-                val adjustedIdx = (idx - 1).coerceIn(0, values.size - 1)
-                if (values[adjustedIdx] != selectedValue) {
-                    onValueSelected(values[adjustedIdx])
-                }
-            }
-    }
-
-    // 外部から値が変わったときにスクロール位置を同期
+    // 外部（クイックチップやステップボタン）から selectedValue が変更されたときの同期
     LaunchedEffect(selectedValue) {
-        val targetIdx = values.indexOf(selectedValue)
-        if (targetIdx >= 0 && !listState.isScrollInProgress) {
-            // targetIdx + 1 が中央になるように targetIdx にスクロール
-            listState.animateScrollToItem(targetIdx)
+        val idx = values.indexOf(selectedValue)
+        if (idx in values.indices && !listState.isScrollInProgress) {
+            if (listState.firstVisibleItemIndex != idx) {
+                listState.animateScrollToItem(idx)
+            }
         }
+    }
+
+    // スクロール停止時のみ中央（firstVisibleItemIndex）の値を確定（フィードバックループ防止）
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .filter { !it } // スクロールが停止した瞬間
+            .collect {
+                val centerIdx = listState.firstVisibleItemIndex.coerceIn(0, values.size - 1)
+                val value = values[centerIdx]
+                if (value != selectedValue) {
+                    onValueSelected(value)
+                }
+            }
     }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
     ) {
-        // 上ボタン（▲）
+        // 上ボタン（▲ / ^）: canStepUp が false のときは無効化（00のときは反応しない）
         IconButton(
-            onClick = {
-                onStepUp()
-            },
-            modifier = Modifier.size(32.dp)
+            onClick = onStepUp,
+            enabled = canStepUp,
+            modifier = Modifier.size(30.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowUp,
-                contentDescription = "$label を増やす",
-                tint = OkanTextSecondary,
-                modifier = Modifier.size(20.dp)
+                contentDescription = "$label を減らす",
+                tint = if (canStepUp) OkanTextPrimary else OkanTextSecondary.copy(alpha = 0.25f),
+                modifier = Modifier.size(22.dp)
             )
         }
 
         // ホイール表示領域
         Box(
             modifier = Modifier
-                .width(80.dp)
+                .width(76.dp)
                 .height(totalHeight),
             contentAlignment = Alignment.Center
         ) {
-            // 中央選択中のハイライト帯
+            // 中央選択中の水色ハイライト帯
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -273,14 +268,14 @@ private fun DialColumnWithControls(
                     .height(totalHeight),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // 上部余白アイテム
+                // 上部ダミー余白
                 item {
                     Box(modifier = Modifier.height(itemHeight))
                 }
 
                 items(values.size) { index ->
                     val value = values[index]
-                    val isCurrentCenter = (index == centerIndex - 1)
+                    val isSelected = (value == selectedValue)
 
                     Box(
                         modifier = Modifier
@@ -299,15 +294,15 @@ private fun DialColumnWithControls(
                     ) {
                         Text(
                             text = "%02d".format(value),
-                            fontSize = if (isCurrentCenter) 26.sp else 16.sp,
-                            fontWeight = if (isCurrentCenter) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isCurrentCenter) OkanTextPrimary else OkanTextSecondary.copy(alpha = 0.4f),
+                            fontSize = if (isSelected) 24.sp else 16.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) OkanTextPrimary else OkanTextSecondary.copy(alpha = 0.45f),
                             textAlign = TextAlign.Center
                         )
                     }
                 }
 
-                // 下部余白アイテム
+                // 下部ダミー余白
                 item {
                     Box(modifier = Modifier.height(itemHeight))
                 }
@@ -316,16 +311,15 @@ private fun DialColumnWithControls(
 
         // 下ボタン（▼）
         IconButton(
-            onClick = {
-                onStepDown()
-            },
-            modifier = Modifier.size(32.dp)
+            onClick = onStepDown,
+            enabled = canStepDown,
+            modifier = Modifier.size(30.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "$label を減らす",
-                tint = OkanTextSecondary,
-                modifier = Modifier.size(20.dp)
+                contentDescription = "$label を増やす",
+                tint = if (canStepDown) OkanTextPrimary else OkanTextSecondary.copy(alpha = 0.25f),
+                modifier = Modifier.size(22.dp)
             )
         }
 

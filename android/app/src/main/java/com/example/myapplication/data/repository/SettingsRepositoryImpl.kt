@@ -21,6 +21,8 @@ class SettingsRepositoryImpl(
         private const val KEY_CUSTOM_MESSAGE = "custom_message"
         private const val KEY_BLACKLISTED_PACKAGES = "blacklisted_packages"
         private const val KEY_IS_MONITORING_ACTIVE = "is_monitoring_active"
+        private const val KEY_MONITORING_START_TIME = "monitoring_start_time"
+        private const val KEY_PERSONALITY = "okan_personality"
 
         private val DEFAULT_BLACKLIST = setOf(
             "com.google.android.youtube",
@@ -45,6 +47,12 @@ class SettingsRepositoryImpl(
     private val _isMonitoringActiveFlow = MutableStateFlow(loadIsMonitoringActive())
     override val isMonitoringActiveFlow: Flow<Boolean> = _isMonitoringActiveFlow.asStateFlow()
 
+    private val _monitoringStartTimeFlow = MutableStateFlow(loadMonitoringStartTime())
+    override val monitoringStartTimeFlow: Flow<Long> = _monitoringStartTimeFlow.asStateFlow()
+
+    private val _personalityFlow = MutableStateFlow(loadPersonality())
+    override val personalityFlow: Flow<String> = _personalityFlow.asStateFlow()
+
     private fun loadUserRole(): UserRole {
         val name = prefs.getString(KEY_USER_ROLE, UserRole.INDIVIDUAL.name)
         return try {
@@ -55,12 +63,12 @@ class SettingsRepositoryImpl(
     }
 
     private fun loadLimitMillis(): Long {
-        // デフォルト: 60分 (60 * 60 * 1000)
-        return prefs.getLong(KEY_LIMIT_TIME_MILLIS, 60L * 60 * 1000)
+        // デフォルト: 30分 (30 * 60 * 1000)
+        return prefs.getLong(KEY_LIMIT_TIME_MILLIS, 30L * 60 * 1000)
     }
 
     private fun loadCustomMessage(): String? {
-        return prefs.getString(KEY_CUSTOM_MESSAGE, null)
+        return prefs.getString(KEY_CUSTOM_MESSAGE, "料理中にスマホいじっちゃダメ！")
     }
 
     private fun loadBlacklistedPackages(): Set<String> {
@@ -68,7 +76,15 @@ class SettingsRepositoryImpl(
     }
 
     private fun loadIsMonitoringActive(): Boolean {
-        return prefs.getBoolean(KEY_IS_MONITORING_ACTIVE, true)
+        return prefs.getBoolean(KEY_IS_MONITORING_ACTIVE, false)
+    }
+
+    private fun loadMonitoringStartTime(): Long {
+        return prefs.getLong(KEY_MONITORING_START_TIME, 0L)
+    }
+
+    private fun loadPersonality(): String {
+        return prefs.getString(KEY_PERSONALITY, "STANDARD") ?: "STANDARD"
     }
 
     override suspend fun setUserRole(role: UserRole) {
@@ -98,5 +114,15 @@ class SettingsRepositoryImpl(
     override suspend fun setMonitoringActive(active: Boolean) {
         prefs.edit().putBoolean(KEY_IS_MONITORING_ACTIVE, active).apply()
         _isMonitoringActiveFlow.value = active
+    }
+
+    override suspend fun setMonitoringStartTime(startTimeMillis: Long) {
+        prefs.edit().putLong(KEY_MONITORING_START_TIME, startTimeMillis).apply()
+        _monitoringStartTimeFlow.value = startTimeMillis
+    }
+
+    override suspend fun setPersonality(personality: String) {
+        prefs.edit().putString(KEY_PERSONALITY, personality).apply()
+        _personalityFlow.value = personality
     }
 }

@@ -9,10 +9,14 @@ interface SettingsRepository {
     val customMessageFlow: Flow<String?>
     val blacklistedPackagesFlow: Flow<Set<String>>
     val isMonitoringActiveFlow: Flow<Boolean>
+    val monitoringStartTimeFlow: Flow<Long>
+    val personalityFlow: Flow<String>
 
     suspend fun setUserRole(role: UserRole)
     suspend fun setLimitTimeMillis(limitMillis: Long)
     suspend fun setCustomMessage(message: String?)
     suspend fun updateBlacklistedPackages(packages: Set<String>)
     suspend fun setMonitoringActive(active: Boolean)
+    suspend fun setMonitoringStartTime(startTimeMillis: Long)
+    suspend fun setPersonality(personality: String)
 }
