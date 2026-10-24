@@ -99,7 +99,6 @@ fun OkanApp() {
         when (currentScreen) {
             Screen.START_MONITORING -> currentScreen = Screen.HOME
             Screen.QR_CODE -> {
-                // 初回フローからのQR画面であればWELCOMEに戻す
                 currentScreen = Screen.WELCOME
             }
             Screen.SETTINGS_APP, Screen.SETTINGS_QUIET_HOURS, Screen.SETTINGS_NOTIFICATION -> {
@@ -113,7 +112,10 @@ fun OkanApp() {
         }
     }
 
-    val showBottomBar = currentScreen != Screen.WELCOME && currentScreen != Screen.QR_CODE
+    // ボトムバーの表示制御（ウェルカム画面、QRコード画面、または子供アカウントの見守り中画面は非表示）
+    val showBottomBar = currentScreen != Screen.WELCOME &&
+            currentScreen != Screen.QR_CODE &&
+            !(userRole == UserRole.CHILD && isMonitoring)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -145,11 +147,13 @@ fun OkanApp() {
                             userRole = role
                             when (role) {
                                 UserRole.INDIVIDUAL -> {
+                                    // 個人管理ならホームにとぶ
                                     isMonitoring = false
                                     currentScreen = Screen.HOME
                                     currentTab = TabItem.HOME
                                 }
                                 UserRole.PARENT, UserRole.CHILD -> {
+                                    // 親またはこどもならQRコード画面へ
                                     currentScreen = Screen.QR_CODE
                                 }
                             }
@@ -160,6 +164,8 @@ fun OkanApp() {
                 Screen.HOME -> {
                     HomeScreen(
                         isMonitoring = isMonitoring,
+                        userRole = userRole,
+                        durationMinutes = currentDurationMinutes,
                         onPrepareMonitoringClick = {
                             currentScreen = Screen.START_MONITORING
                         },
@@ -201,11 +207,12 @@ fun OkanApp() {
                         userRole = userRole,
                         onPairingCompleted = {
                             if (userRole == UserRole.PARENT) {
+                                // 親アカウントは、ホーム画面にとぶ
                                 isMonitoring = false
                                 currentScreen = Screen.HOME
                                 currentTab = TabItem.HOME
                             } else {
-                                // 子供アカウントは見守り中画面へ遷移！
+                                // 子供アカウントは、見守り中画面にとぶ
                                 isMonitoring = true
                                 currentScreen = Screen.HOME
                                 currentTab = TabItem.HOME
