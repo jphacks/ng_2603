@@ -1,5 +1,6 @@
 package com.example.myapplication.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,14 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,20 +31,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.myapplication.R
 import com.example.myapplication.domain.model.AvatarExpression
 import com.example.myapplication.domain.model.DisappointmentLevel
 import com.example.myapplication.ui.components.OkanTopBar
-import com.example.myapplication.ui.disappointment.MainDisappointmentScreen
 import com.example.myapplication.ui.disappointment.components.ParentAvatarView
 import com.example.myapplication.ui.model.UserRole
 import com.example.myapplication.ui.theme.OkanBackground
 import com.example.myapplication.ui.theme.OkanCardGray
+import com.example.myapplication.ui.theme.OkanDanger
 import com.example.myapplication.ui.theme.OkanPrimary
 import com.example.myapplication.ui.theme.OkanPrimaryContainer
+import com.example.myapplication.ui.theme.OkanSurface
 import com.example.myapplication.ui.theme.OkanTextPrimary
 import com.example.myapplication.ui.theme.OkanTextSecondary
 
@@ -57,18 +60,6 @@ fun HomeScreen(
     onStopMonitoringClick: () -> Unit,
     onQrClick: () -> Unit = {}
 ) {
-    if (isMonitoring) {
-        // 見守り・監視中（統合メイン画面：親の呆れ演出、スクリーンタイム、段階的警告）
-        MainDisappointmentScreen()
-    } else {
-        // 通常の待機状態ホーム
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(OkanBackground)
-        ) {
-            OkanTopBar(onMoreClick = onQrClick)
-
     var showStopDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -95,17 +86,6 @@ fun HomeScreen(
                     .padding(horizontal = 24.dp)
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "ホーム",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OkanTextPrimary
-                )
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                // 中央の状態カード（親アバタープレビューと状態）
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -151,13 +131,14 @@ fun HomeScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
+                        // 親アバタープレビュー
                         ParentAvatarView(
                             expression = AvatarExpression.SMILE,
                             level = DisappointmentLevel.LEVEL_0_SERENE,
-                            modifier = Modifier.size(130.dp)
+                            modifier = Modifier.size(120.dp)
                         )
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
                         Text(
                             text = "見守り待機中",
@@ -169,50 +150,20 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = "使いすぎると親がだんだん呆れていきます。\n準備ができたら見守りを開始しましょう！",
+                            text = if (userRole == UserRole.PARENT) {
+                                "連携端末: お子様のスマホ 連携完了"
+                            } else {
+                                "使いすぎると親がだんだん呆れていきます。\n準備ができたら見守りを開始しましょう！"
+                            },
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Normal,
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(OkanPrimaryContainer)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "待機中",
-                                tint = OkanPrimary,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Text(
-                            text = "ここにレベル（進行度）等",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
                             color = OkanTextSecondary,
                             textAlign = TextAlign.Center,
                             lineHeight = 18.sp
                         )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = if (userRole == UserRole.PARENT) {
-                                "連携端末: お子様のスマホ 連携中"
-                            } else {
-                                "準備ができたら見守りを開始しましょう"
-                            },
-                            fontSize = 12.sp,
-                            color = OkanTextSecondary.copy(alpha = 0.7f)
-                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
                 Spacer(modifier = Modifier.height(24.dp))
 
                 // 「見守り開始準備」ボタン
@@ -224,10 +175,14 @@ fun HomeScreen(
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = OkanPrimary,
-                        contentColor = androidx.compose.ui.graphics.Color.White
+                        contentColor = OkanSurface
                     )
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(
                         text = "見守り開始準備",
