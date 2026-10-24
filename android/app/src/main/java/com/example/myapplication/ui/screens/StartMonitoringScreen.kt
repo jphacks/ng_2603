@@ -43,6 +43,7 @@ import com.example.myapplication.ui.theme.OkanPrimary
 import com.example.myapplication.ui.theme.OkanPrimaryContainer
 import com.example.myapplication.ui.theme.OkanSurface
 import com.example.myapplication.ui.theme.OkanTextPrimary
+import com.example.myapplication.ui.theme.OkanTextSecondary
 
 @Composable
 fun StartMonitoringScreen(
@@ -81,12 +82,12 @@ fun StartMonitoringScreen(
                 color = OkanTextPrimary
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
             // 項目1: あなたに今やって欲しくないことは何？
             Text(
                 text = "あなたに今やって欲しくないことは何？",
-                fontSize = 13.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = OkanTextPrimary
             )
@@ -94,10 +95,10 @@ fun StartMonitoringScreen(
             OutlinedTextField(
                 value = prohibitionText,
                 onValueChange = { prohibitionText = it },
-                placeholder = { Text("例: SNS見ちゃダメ！") },
+                placeholder = { Text("例: 料理中にスマホいじっちゃダメ！") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(80.dp),
+                    .height(82.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = OkanPrimary,
@@ -112,15 +113,27 @@ fun StartMonitoringScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // 項目2: 制限時間セット（ドラムロール・ダイヤル式）
-            Text(
-                text = "制限時間セット",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = OkanTextPrimary
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "制限時間セット",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = OkanTextPrimary
+                )
+                Text(
+                    text = "合計: ${selectedHour * 60 + selectedMinute}分",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = OkanPrimary
+                )
+            }
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ダイヤルピッカーコンポーネント
+            // ダイヤルピッカーコンポーネント（上下ダイヤル式）
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -145,7 +158,7 @@ fun StartMonitoringScreen(
             // 項目3: おかんのタイプ（性格）
             Text(
                 text = "おかんのタイプ（性格）",
-                fontSize = 13.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = OkanTextPrimary
             )
@@ -167,7 +180,7 @@ fun StartMonitoringScreen(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp)
+                            .height(46.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (isSelected) OkanPrimaryContainer else Color.Transparent)
                             .clickable { selectedPersonality = personality }
@@ -206,7 +219,7 @@ fun StartMonitoringScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(28.dp))
         }
     }
 }
