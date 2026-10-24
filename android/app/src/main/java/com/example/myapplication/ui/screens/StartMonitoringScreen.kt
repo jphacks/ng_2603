@@ -11,14 +11,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,18 +69,22 @@ fun StartMonitoringScreen(
             .fillMaxSize()
             .background(OkanBackground)
     ) {
+        // 上部バー
         OkanTopBar(
+            title = "見守り設定",
             canNavigateBack = true,
             onBackClick = onBackClick
         )
 
+        // スクロール可能なフォーム領域（weight(1f) で画面下部ボタンと分離）
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .weight(1f)
                 .verticalScroll(scrollState)
                 .padding(horizontal = 24.dp)
         ) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Text(
                 text = "見守り開始設定",
@@ -82,7 +93,7 @@ fun StartMonitoringScreen(
                 color = OkanTextPrimary
             )
 
-            Spacer(modifier = Modifier.height(22.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 項目1: あなたに今やって欲しくないことは何？
             Text(
@@ -98,7 +109,7 @@ fun StartMonitoringScreen(
                 placeholder = { Text("例: 料理中にスマホいじっちゃダメ！") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(82.dp),
+                    .height(80.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = OkanPrimary,
@@ -110,7 +121,7 @@ fun StartMonitoringScreen(
                 maxLines = 2
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 項目2: 制限時間セット（ドラムロール・ダイヤル式）
             Row(
@@ -141,7 +152,7 @@ fun StartMonitoringScreen(
                     .clip(RoundedCornerShape(16.dp))
                     .border(1.dp, OkanBorder, RoundedCornerShape(16.dp))
                     .background(OkanSurface)
-                    .padding(vertical = 12.dp)
+                    .padding(vertical = 10.dp)
             ) {
                 DialTimePicker(
                     selectedHour = selectedHour,
@@ -153,7 +164,7 @@ fun StartMonitoringScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 項目3: おかんのタイプ（性格）
             Text(
@@ -180,7 +191,7 @@ fun StartMonitoringScreen(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .weight(1f)
-                            .height(46.dp)
+                            .height(44.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (isSelected) OkanPrimaryContainer else Color.Transparent)
                             .clickable { selectedPersonality = personality }
@@ -195,31 +206,48 @@ fun StartMonitoringScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(36.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+        }
 
-            // 見守り開始ボタン
-            Button(
-                onClick = {
-                    val totalMinutes = selectedHour * 60 + selectedMinute
-                    onStartMonitoringClick(prohibitionText, totalMinutes, selectedPersonality)
-                },
+        // 画面下部に常に固定される「見守り開始」ボタンエリア（絶対に隠れない）
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = OkanSurface,
+            shadowElevation = 8.dp
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = OkanCardGray,
-                    contentColor = OkanTextPrimary
-                )
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 12.dp)
             ) {
-                Text(
-                    text = "見守り開始",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Button(
+                    onClick = {
+                        val totalMinutes = (selectedHour * 60 + selectedMinute).coerceAtLeast(1)
+                        onStartMonitoringClick(prohibitionText, totalMinutes, selectedPersonality)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = OkanPrimary,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text(
+                        text = "見守り開始",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
-
-            Spacer(modifier = Modifier.height(28.dp))
         }
     }
 }

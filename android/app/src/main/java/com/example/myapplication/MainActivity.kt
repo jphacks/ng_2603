@@ -1,22 +1,51 @@
 package com.example.myapplication
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.myapplication.data.repository.ScreenTimeRepositoryImpl
+import com.example.myapplication.data.repository.SettingsRepositoryImpl
+import com.example.myapplication.domain.model.AvatarExpression
+import com.example.myapplication.domain.model.DisappointmentLevel
+import com.example.myapplication.domain.model.DisappointmentMessage
+import com.example.myapplication.service.AppMonitoringService
+import com.example.myapplication.service.NotificationHelper
 import com.example.myapplication.ui.components.OkanBottomBar
 import com.example.myapplication.ui.model.AppNotificationTarget
 import com.example.myapplication.ui.model.OkanPersonality
@@ -36,6 +65,7 @@ import com.example.myapplication.ui.screens.SoundSettingsScreen
 import com.example.myapplication.ui.screens.StartMonitoringScreen
 import com.example.myapplication.ui.screens.WelcomeScreen
 import com.example.myapplication.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +81,14 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun OkanApp() {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val coroutineScope = rememberCoroutineScope()
+
+    val settingsRepository = remember { SettingsRepositoryImpl(context) }
+    val screenTimeRepository = remember { ScreenTimeRepositoryImpl(context, settingsRepository) }
+    val notificationHelper = remember { NotificationHelper(context) }
+
     var currentScreen by remember { mutableStateOf(Screen.WELCOME) }
     var currentTab by remember { mutableStateOf(TabItem.HOME) }
     var isMonitoring by remember { mutableStateOf(false) }
@@ -60,6 +98,94 @@ fun OkanApp() {
     var currentProhibition by remember { mutableStateOf("料理中にスマホいじっちゃダメ！") }
     var currentDurationMinutes by remember { mutableIntStateOf(30) }
     var currentPersonality by remember { mutableStateOf(OkanPersonality.STANDARD) }
+
+    // 権限ダイアログの表示管理
+    var showUsagePermissionDialog by remember { mutableStateOf(false) }
+
+    // 通知権限リクエストランチャー (Android 13+)
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permission = Manifest.permission.POST_NOTIFICATIONS
+            if (ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(permission)
+            }
+        }
+    }
+
+    // アプリがバックグラウンドに回った瞬間（他アプリやホームを開いたとき）の即時おかん通知
+    DisposableEffect(lifecycleOwner, isMonitoring, currentProhibition) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && isMonitoring) {
+                // 他のアプリを開いたと検知！即座にお母さん通知を発火
+                val quote = when (currentPersonality) {
+                    OkanPersonality.SWEET -> "もう、スマホ置いてやるべきこと頑張って〜！"
+                    OkanPersonality.STRICT -> "こら！！今すぐスマホを置きなさい！！"
+                    OkanPersonality.STANDARD -> "こら！「$currentProhibition」って約束したでしょ！"
+                }
+                notificationHelper.showDisappointmentNotification(
+                    message = DisappointmentMessage(
+                        level = DisappointmentLevel.LEVEL_2_SIGHING,
+                        mainQuote = quote,
+                        subQuote = "お母さん全部お見通しなんやからね！約束の時間まで我慢しなさい！",
+                        expression = AvatarExpression.GLARE
+                    ),
+                    appName = "スマートフォン",
+                    enableVibration = true
+                )
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // 見守り開始ヘルパー関数
+    fun startMonitoringService(prohibition: String, minutes: Int, personality: OkanPersonality) {
+        currentProhibition = prohibition
+        currentDurationMinutes = minutes
+        currentPersonality = personality
+        isMonitoring = true
+
+        coroutineScope.launch {
+            settingsRepository.setMonitoringActive(true)
+            settingsRepository.setCustomMessage(prohibition)
+            settingsRepository.setLimitTimeMillis(minutes * 60 * 1000L)
+            settingsRepository.setUserRole(
+                when (userRole) {
+                    UserRole.INDIVIDUAL -> com.example.myapplication.domain.model.UserRole.INDIVIDUAL
+                    UserRole.PARENT -> com.example.myapplication.domain.model.UserRole.PARENT
+                    UserRole.CHILD -> com.example.myapplication.domain.model.UserRole.CHILD
+                }
+            )
+
+            // 常駐監視サービスの開始
+            val intent = Intent(context, AppMonitoringService::class.java)
+            try {
+                ContextCompat.startForegroundService(context, intent)
+            } catch (_: Exception) {
+            }
+
+            // 使用統計権限がなければダイアログを促す
+            if (!screenTimeRepository.hasUsageStatsPermission()) {
+                showUsagePermissionDialog = true
+            }
+        }
+    }
+
+    // 見守り停止ヘルパー関数
+    fun stopMonitoringService() {
+        isMonitoring = false
+        coroutineScope.launch {
+            settingsRepository.setMonitoringActive(false)
+            val intent = Intent(context, AppMonitoringService::class.java)
+            context.stopService(intent)
+        }
+    }
 
     // アプリ通知設定リスト
     var apps by remember {
@@ -112,9 +238,11 @@ fun OkanApp() {
         }
     }
 
-    // ボトムバーの表示制御（ウェルカム画面、QRコード画面、または子供アカウントの見守り中画面は非表示）
+    // ボトムバーの表示制御
+    // ウェルカム、QRコード、見守り設定画面、または子供見守り中画面ではボトムバーを非表示にして全画面を活用！
     val showBottomBar = currentScreen != Screen.WELCOME &&
             currentScreen != Screen.QR_CODE &&
+            currentScreen != Screen.START_MONITORING &&
             !(userRole == UserRole.CHILD && isMonitoring)
 
     Scaffold(
@@ -170,7 +298,7 @@ fun OkanApp() {
                             currentScreen = Screen.START_MONITORING
                         },
                         onStopMonitoringClick = {
-                            isMonitoring = false
+                            stopMonitoringService()
                         },
                         onQrClick = {
                             currentScreen = Screen.QR_CODE
@@ -181,10 +309,7 @@ fun OkanApp() {
                 Screen.START_MONITORING -> {
                     StartMonitoringScreen(
                         onStartMonitoringClick = { prohibition, minutes, personality ->
-                            currentProhibition = prohibition
-                            currentDurationMinutes = minutes
-                            currentPersonality = personality
-                            isMonitoring = true
+                            startMonitoringService(prohibition, minutes, personality)
                             currentScreen = Screen.HOME
                         },
                         onBackClick = {
@@ -213,7 +338,11 @@ fun OkanApp() {
                                 currentTab = TabItem.HOME
                             } else {
                                 // 子供アカウントは、見守り中画面にとぶ
-                                isMonitoring = true
+                                startMonitoringService(
+                                    prohibition = "お母さんとの約束を守ろう！",
+                                    minutes = 30,
+                                    personality = OkanPersonality.STANDARD
+                                )
                                 currentScreen = Screen.HOME
                                 currentTab = TabItem.HOME
                             }
@@ -301,6 +430,45 @@ fun OkanApp() {
                 }
             }
         }
+    }
+
+    // 使用状況へのアクセス権限誘導ダイアログ
+    if (showUsagePermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showUsagePermissionDialog = false },
+            title = {
+                Text(text = "他のアプリ監視の許可", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(text = "他のアプリ（YouTubeやSNSなど）を開いたときにおかんが叱るために、「使用状況へのアクセス」権限を許可してください。")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showUsagePermissionDialog = false
+                        try {
+                            val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            val fallbackIntent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(fallbackIntent)
+                        }
+                    }
+                ) {
+                    Text("設定を開く")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUsagePermissionDialog = false }) {
+                    Text("あとで")
+                }
+            }
+        )
     }
 }
 

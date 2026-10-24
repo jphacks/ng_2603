@@ -2,13 +2,15 @@ package com.example.myapplication.service
 
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.IBinder
 import com.example.myapplication.data.repository.ScreenTimeRepositoryImpl
 import com.example.myapplication.data.repository.SettingsRepositoryImpl
+import com.example.myapplication.domain.model.AvatarExpression
 import com.example.myapplication.domain.model.DisappointmentLevel
+import com.example.myapplication.domain.model.DisappointmentMessage
 import com.example.myapplication.domain.repository.ScreenTimeRepository
 import com.example.myapplication.domain.repository.SettingsRepository
-import com.example.myapplication.domain.usecase.EvaluateDisappointmentUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,20 +22,23 @@ import kotlinx.coroutines.launch
 
 /**
  * バックグラウンド常時実行・アプリ監視サービス
- * UsageStatsManagerによるフォアグラウンドアプリ検知、
- * 段階的ペナルティ、オーバーレイ制御、連続プッシュ通知を司る。
+ * このアプリ以外のアプリ（YouTube, SNS, ゲーム, ブラウザ等）を開いたときに
+ * お母さんからの小言・警告通知を自動的に送信する。
  */
 class AppMonitoringService : Service() {
 
     private lateinit var screenTimeRepository: ScreenTimeRepository
     private lateinit var settingsRepository: SettingsRepository
-    private lateinit var evaluateDisappointmentUseCase: EvaluateDisappointmentUseCase
     private lateinit var notificationHelper: NotificationHelper
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
     private var monitoringJob: Job? = null
-    private var lastContinuousNotificationTime: Long = 0
-    private var isOverlayCurrentlyShown: Boolean = false
+    private var lastNotifiedPackage: String? = null
+    private var lastNotificationTime: Long = 0
+    private var currentViolationCount = 0
+
+    // ランチャー（ホーム画面）のパッケージ名
+    private var launcherPackageName: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -41,13 +46,20 @@ class AppMonitoringService : Service() {
         super.onCreate()
         settingsRepository = SettingsRepositoryImpl(applicationContext)
         screenTimeRepository = ScreenTimeRepositoryImpl(applicationContext, settingsRepository)
-        evaluateDisappointmentUseCase = EvaluateDisappointmentUseCase()
         notificationHelper = NotificationHelper(applicationContext)
 
-        val initialNotification = notificationHelper.buildMonitoringNotification("利用時間を安全に監視中")
+        launcherPackageName = getLauncherPackage()
+
+        val initialNotification = notificationHelper.buildMonitoringNotification("おかんが見守り中（約束を守ってね）")
         startForeground(NotificationHelper.NOTIFICATION_ID_FOREGROUND_SERVICE, initialNotification)
 
         startMonitoringLoop()
+    }
+
+    private fun getLauncherPackage(): String? {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val resolveInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        return resolveInfo?.activityInfo?.packageName
     }
 
     private fun startMonitoringLoop() {
@@ -57,115 +69,130 @@ class AppMonitoringService : Service() {
                 try {
                     val isActiveMonitoring = settingsRepository.isMonitoringActiveFlow.first()
                     if (!isActiveMonitoring) {
-                        dismissAllInterventions()
-                        delay(5000)
+                        lastNotifiedPackage = null
+                        delay(3000)
                         continue
                     }
 
                     val currentForegroundApp = screenTimeRepository.getCurrentForegroundPackage()
-                    val blacklisted = settingsRepository.blacklistedPackagesFlow.first()
-                    val userRole = settingsRepository.userRoleFlow.first()
-                    val limitMillis = settingsRepository.limitTimeMillisFlow.first()
-                    val customMessage = settingsRepository.customMessageFlow.first()
+                    val customProhibition = settingsRepository.customMessageFlow.first() ?: "スマホいじっちゃダメ！"
 
-                    // 自アプリやホーム画面、ホワイトリストの場合は即座に介入を全解除
-                    val isRestrictedAppRunning = currentForegroundApp != null &&
+                    // 自アプリおよびホーム画面（ランチャー）以外を開いた場合を「他のアプリを開いた」と判定
+                    val isOtherAppRunning = currentForegroundApp != null &&
                             currentForegroundApp != packageName &&
-                            blacklisted.contains(currentForegroundApp)
+                            currentForegroundApp != launcherPackageName &&
+                            !currentForegroundApp.contains("launcher", ignoreCase = true)
 
-                    if (!isRestrictedAppRunning) {
-                        dismissAllInterventions()
+                    if (isOtherAppRunning) {
+                        val now = System.currentTimeMillis()
+                        val appName = getAppName(currentForegroundApp!!)
+
+                        // 他のアプリに切り替わった瞬間、または前回の通知から10秒以上経過している場合に発火
+                        val shouldNotify = (currentForegroundApp != lastNotifiedPackage) ||
+                                (now - lastNotificationTime >= 10000L)
+
+                        if (shouldNotify) {
+                            lastNotifiedPackage = currentForegroundApp
+                            lastNotificationTime = now
+                            currentViolationCount++
+
+                            sendOkanWarningNotification(
+                                appName = appName,
+                                prohibition = customProhibition,
+                                violationCount = currentViolationCount
+                            )
+                        }
                     } else {
-                        // 制限対象アプリがフォアグラウンドで動作中
-                        val usageList = screenTimeRepository.getTodayAppUsageList()
-                        val currentAppUsage = usageList.find { it.packageName == currentForegroundApp }
-                        val usedMillis = currentAppUsage?.usedTimeMillis ?: 0L
-
-                        val evaluation = evaluateDisappointmentUseCase(
-                            totalUsedMillis = usedMillis,
-                            limitMillis = limitMillis,
-                            userRole = userRole,
-                            customMessageOverride = customMessage
-                        )
-
-                        handleIntervention(
-                            currentPackage = currentForegroundApp,
-                            appName = currentAppUsage?.appName ?: "対象アプリ",
-                            level = evaluation.level,
-                            quote = evaluation.message.mainQuote,
-                            subQuote = evaluation.message.subQuote,
-                            penalty = evaluation.penaltyConfig
-                        )
+                        if (currentForegroundApp == packageName) {
+                            // 自アプリに戻ってきた
+                            lastNotifiedPackage = null
+                        }
                     }
                 } catch (_: Exception) {
-                    // 例外によるクラッシュを防止し監視を継続
+                    // 監視を継続
                 }
 
-                // 介入度合いに応じてポーリング頻度を動的に調整（バッテリー保護）
-                val pollInterval = if (isOverlayCurrentlyShown) 1000L else 2500L
-                delay(pollInterval)
+                delay(1500L)
             }
         }
     }
 
-    private fun handleIntervention(
-        currentPackage: String,
+    /**
+     * お母さん（おかん）らしい説教・小言の通知を送信
+     */
+    private fun sendOkanWarningNotification(
         appName: String,
-        level: DisappointmentLevel,
-        quote: String,
-        subQuote: String,
-        penalty: com.example.myapplication.domain.model.PenaltyConfig
+        prohibition: String,
+        violationCount: Int
     ) {
-        val now = System.currentTimeMillis()
-
-        // 1. 段階的・連続プッシュ通知
-        if (penalty.continuousNotificationIntervalSeconds > 0) {
-            val intervalMillis = penalty.continuousNotificationIntervalSeconds * 1000L
-            if (now - lastContinuousNotificationTime >= intervalMillis) {
-                lastContinuousNotificationTime = now
-                val message = com.example.myapplication.domain.model.DisappointmentMessage(
-                    level = level,
-                    mainQuote = quote,
-                    subQuote = subQuote,
-                    expression = if (level == DisappointmentLevel.LEVEL_4_COLD_STARE) {
-                        com.example.myapplication.domain.model.AvatarExpression.COLD_STARE
-                    } else com.example.myapplication.domain.model.AvatarExpression.GLARE
+        val (quote, subQuote, level) = when {
+            violationCount <= 1 -> {
+                Triple(
+                    "こら！「$appName」開いてるでしょ！",
+                    "「$prohibition」って約束したやろ！今すぐスマホ置きなさい！",
+                    DisappointmentLevel.LEVEL_1_SUSPICIOUS
                 )
-                notificationHelper.showDisappointmentNotification(
-                    message = message,
-                    appName = appName,
-                    enableVibration = penalty.enableVibration
+            }
+            violationCount <= 3 -> {
+                Triple(
+                    "まだ「$appName」見てんの！？",
+                    "お母さん全部見てるんやからね！約束の時間まで我慢しなさい！",
+                    DisappointmentLevel.LEVEL_2_SIGHING
+                )
+            }
+            violationCount <= 5 -> {
+                Triple(
+                    "いい加減にしなさい！！",
+                    "「$prohibition」って言ったのに何回開く気！？スマホ没収するよ！",
+                    DisappointmentLevel.LEVEL_3_ANNOYED
+                )
+            }
+            else -> {
+                Triple(
+                    "………………（激怒）",
+                    "もう何も言いません。今すぐ現実に戻りなさい！！",
+                    DisappointmentLevel.LEVEL_4_COLD_STARE
                 )
             }
         }
 
-        // 2. 強制オーバーレイ (SYSTEM_ALERT_WINDOW)
-        if (penalty.showOverlay && screenTimeRepository.hasOverlayPermission()) {
-            DisappointmentOverlayService.show(
-                context = this,
-                alpha = penalty.overlayAlpha,
-                blockTouch = penalty.blockTouchEvents,
-                quote = quote,
-                subQuote = subQuote
-            )
-            isOverlayCurrentlyShown = true
-        } else {
-            if (isOverlayCurrentlyShown) {
-                DisappointmentOverlayService.hide(this)
-                isOverlayCurrentlyShown = false
+        val message = DisappointmentMessage(
+            level = level,
+            mainQuote = quote,
+            subQuote = subQuote,
+            expression = when (level) {
+                DisappointmentLevel.LEVEL_1_SUSPICIOUS -> AvatarExpression.DOUBT
+                DisappointmentLevel.LEVEL_2_SIGHING -> AvatarExpression.SIGH
+                DisappointmentLevel.LEVEL_3_ANNOYED -> AvatarExpression.GLARE
+                else -> AvatarExpression.COLD_STARE
             }
-        }
+        )
+
+        notificationHelper.showDisappointmentNotification(
+            message = message,
+            appName = appName,
+            enableVibration = true
+        )
     }
 
-    private fun dismissAllInterventions() {
-        if (isOverlayCurrentlyShown) {
-            DisappointmentOverlayService.hide(this)
-            isOverlayCurrentlyShown = false
+    private fun getAppName(packageName: String): String {
+        return try {
+            val info = packageManager.getApplicationInfo(packageName, 0)
+            packageManager.getApplicationLabel(info).toString()
+        } catch (_: Exception) {
+            when {
+                packageName.contains("youtube", ignoreCase = true) -> "YouTube"
+                packageName.contains("chrome", ignoreCase = true) -> "Chrome"
+                packageName.contains("twitter", ignoreCase = true) || packageName.contains("x", ignoreCase = true) -> "X"
+                packageName.contains("instagram", ignoreCase = true) -> "Instagram"
+                packageName.contains("line", ignoreCase = true) -> "LINE"
+                else -> "アプリ"
+            }
         }
     }
 
     override fun onDestroy() {
-        dismissAllInterventions()
+        monitoringJob?.cancel()
         serviceScope.cancel()
         super.onDestroy()
     }
