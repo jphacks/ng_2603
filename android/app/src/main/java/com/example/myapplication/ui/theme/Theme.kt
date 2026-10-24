@@ -3,6 +3,7 @@ package com.example.myapplication.ui.theme
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -26,6 +27,16 @@ private val LightColorScheme = lightColorScheme(
     onError = OkanSurface
 )
 
+private val DarkColorScheme = darkColorScheme(
+    primary = BlockinPurplePrimary,
+    secondary = BlockinCyanSecondary,
+    background = BlockinDarkBackground,
+    surface = BlockinDarkSurface,
+    onPrimary = BlockinTextPrimary,
+    onBackground = BlockinTextPrimary,
+    onSurface = BlockinTextPrimary
+)
+
 @Composable
 fun MyApplicationTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -36,15 +47,24 @@ fun MyApplicationTheme(
         SideEffect {
             val window = (view.context as? Activity)?.window
             if (window != null) {
-                window.statusBarColor = OkanBackground.toArgb()
-                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = true
+                window.statusBarColor = (if (darkTheme) BlockinDarkBackground else OkanBackground).toArgb()
+                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
             }
         }
     }
 
     MaterialTheme(
-        colorScheme = LightColorScheme,
+        colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
         typography = Typography,
         content = content
     )
+}
+
+// 互換性エイリアス
+@Composable
+fun BlockinTheme(
+    darkTheme: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    MyApplicationTheme(darkTheme = darkTheme, content = content)
 }
