@@ -133,7 +133,7 @@ class ScreenTimeRepositoryImpl(
                     isForeground = false
                     val diff = (event.timeStamp - lastEventTime).coerceIn(0L, 3600000L)
                     hourlyMap[eventHour] = (hourlyMap[eventHour] ?: 0L) + diff
-                    if (event.packageName.contains("youtube") || event.packageName.contains("twitter") || event.packageName.contains("instagram")) {
+                    if (isRestrictedApp(event.packageName)) {
                         distractionMap[eventHour] = (distractionMap[eventHour] ?: 0L) + diff
                     }
                 }
@@ -202,4 +202,28 @@ class ScreenTimeRepositoryImpl(
             delay(3000)
         }
     }.flowOn(Dispatchers.IO)
+
+    private fun isRestrictedApp(packageName: String): Boolean {
+        val prefs = context.getSharedPreferences("okan_app_ui_state", Context.MODE_PRIVATE)
+        val jsonStr = prefs.getString("saved_apps_json", null)
+            ?: context.getSharedPreferences("guardian_settings_prefs", Context.MODE_PRIVATE)
+                .getString("saved_apps_json", null)
+        if (!jsonStr.isNullOrBlank()) {
+            try {
+                val array = org.json.JSONArray(jsonStr)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val pkg = obj.optString("desc", "")
+                    val enabled = obj.optBoolean("enabled", false)
+                    if (pkg.isNotBlank() && packageName.contains(pkg, ignoreCase = true)) {
+                        return !enabled
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return packageName.contains("youtube", ignoreCase = true) ||
+                packageName.contains("twitter", ignoreCase = true) ||
+                packageName.contains("instagram", ignoreCase = true) ||
+                packageName.contains("tiktok", ignoreCase = true)
+    }
 }

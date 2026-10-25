@@ -21,13 +21,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 
 /**
  * バックグラウンド常時実行・アプリ監視サービス
  * - 「時間経過後に開始」/「期間中見守る」の2つのモードに対応
+ * - アプリ設定一覧の連動:
+ *     ・オンのアプリ: 使用中通知を送らない（許可アプリ）
+ *     ・オフのアプリ: 使用中通知を送信する（監視対象）
  * - 制限時間が来たら最初の通知を送信
  * - やめない場合だんだん通知間隔が短縮し頻度が増加（割合）
- * - ホワイトリスト登録アプリは通知対象から除外
  * - 親アカウントの場合は「子供が余計なアプリを開いた回数」を記録・通知
  */
 class AppMonitoringService : Service() {
@@ -44,6 +47,12 @@ class AppMonitoringService : Service() {
     private var hasSentTimeUpNotification = false
 
     private var launcherPackageName: String? = null
+
+    private data class ConfiguredAppTarget(
+        val name: String,
+        val packageName: String,
+        val isEnabled: Boolean
+    )
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -65,6 +74,82 @@ class AppMonitoringService : Service() {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
         val resolveInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
         return resolveInfo?.activityInfo?.packageName
+    }
+
+    /**
+     * アプリ設定画面で保存された最新のアプリ設定リスト（オン/オフ）を読み取る
+     */
+    private fun loadConfiguredApps(): List<ConfiguredAppTarget> {
+        val prefsOkan = applicationContext.getSharedPreferences("okan_app_ui_state", Context.MODE_PRIVATE)
+        val prefsGuardian = applicationContext.getSharedPreferences("guardian_settings_prefs", Context.MODE_PRIVATE)
+        val jsonStr = prefsOkan.getString("saved_apps_json", null)
+            ?: prefsGuardian.getString("saved_apps_json", null)
+            ?: return emptyList()
+
+        return try {
+            val array = JSONArray(jsonStr)
+            val list = mutableListOf<ConfiguredAppTarget>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    ConfiguredAppTarget(
+                        name = obj.optString("name", ""),
+                        packageName = obj.optString("desc", ""),
+                        isEnabled = obj.optBoolean("enabled", false)
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * 特定のアプリが現在通知対象（違反アプリ）かどうかを判定する
+     * - オン（isEnabled = true）に設定されているアプリ: 通知は送らない (false)
+     * - オフ（isEnabled = false）に設定されているアプリ: 通知を送信する (true)
+     */
+    private fun shouldNotifyForApp(
+        currentPackage: String,
+        appName: String,
+        configuredApps: List<ConfiguredAppTarget>,
+        combinedWhitelist: Set<String>
+    ): Boolean {
+        // 自アプリ・ランチャー・システムUIは除外（通知しない）
+        if (currentPackage == packageName ||
+            currentPackage == launcherPackageName ||
+            currentPackage.contains("launcher", ignoreCase = true) ||
+            currentPackage.contains("systemui", ignoreCase = true)
+        ) {
+            return false
+        }
+
+        // 1. アプリ設定一覧（configuredApps）とマッチング
+        val matched = configuredApps.firstOrNull { app ->
+            val pkg = app.packageName.trim()
+            val name = app.name.trim()
+
+            (pkg.isNotBlank() && currentPackage.equals(pkg, ignoreCase = true)) ||
+            (pkg.isNotBlank() && currentPackage.contains(pkg, ignoreCase = true)) ||
+            (name.isNotBlank() && (appName.equals(name, ignoreCase = true) ||
+                    appName.contains(name, ignoreCase = true) ||
+                    name.contains(appName, ignoreCase = true)))
+        }
+
+        if (matched != null) {
+            // アプリ設定でオン（isEnabled == true）のアプリ: 通知は送らない (false)
+            // アプリ設定でオフ（isEnabled == false）のアプリ: 通知を送信する (true)
+            return !matched.isEnabled
+        }
+
+        // 2. 設定一覧にないアプリ: ホワイトリストに含まれていれば通知しない
+        if (combinedWhitelist.any { currentPackage.contains(it, ignoreCase = true) }) {
+            return false
+        }
+
+        // 未設定の一般アプリは通知対象
+        return true
     }
 
     private fun startMonitoringLoop() {
@@ -122,63 +207,68 @@ class AppMonitoringService : Service() {
                     val currentForegroundApp = screenTimeRepository.getCurrentForegroundPackage()
                     val customProhibition = settingsRepository.customMessageFlow.first().orEmpty()
 
-                    // 自アプリ・ランチャー・ホワイトリスト許可アプリは除外
-                    val isOtherAppRunning = currentForegroundApp != null &&
-                            currentForegroundApp != packageName &&
-                            currentForegroundApp != launcherPackageName &&
-                            !currentForegroundApp.contains("launcher", ignoreCase = true) &&
-                            !combinedWhitelist.contains(currentForegroundApp)
+                    if (currentForegroundApp != null) {
+                        val appName = getAppName(currentForegroundApp)
+                        val configuredApps = loadConfiguredApps()
 
-                    if (isOtherAppRunning) {
-                        val appName = getAppName(currentForegroundApp!!)
+                        // オンに設定しているアプリを使っているときは通知は送らない、
+                        // オフに設定しているアプリを使っているときは通知を送信する
+                        val shouldNotifyThisApp = shouldNotifyForApp(
+                            currentPackage = currentForegroundApp,
+                            appName = appName,
+                            configuredApps = configuredApps,
+                            combinedWhitelist = combinedWhitelist
+                        )
 
-                        // 通知間隔の制御
-                        // - 「時間内使用で通知」: 時間内でスマホを触っていたら即時通知 & 継続使用時も数秒間隔で連続通知
-                        // - 「経過後通知」: だんだん通知が増えていく割合的短縮（25s -> 18s -> 12s -> 8s -> 5s）
-                        val intervalMillis = when {
-                            mode == "DURING_LIMIT" -> {
-                                when {
-                                    currentViolationCount <= 1 -> 5000L
-                                    currentViolationCount == 2 -> 4000L
-                                    else -> 3000L
+                        if (shouldNotifyThisApp) {
+                            // 通知間隔の制御
+                            // - 「時間内使用で通知」: 時間内でスマホを触っていたら即時通知 & 継続使用時も数秒間隔で連続通知
+                            // - 「経過後通知」: だんだん通知が増えていく割合的短縮（25s -> 18s -> 12s -> 8s -> 5s）
+                            val intervalMillis = when {
+                                mode == "DURING_LIMIT" -> {
+                                    when {
+                                        currentViolationCount <= 1 -> 5000L
+                                        currentViolationCount == 2 -> 4000L
+                                        else -> 3000L
+                                    }
+                                }
+                                else -> {
+                                    when {
+                                        currentViolationCount <= 1 -> 25000L
+                                        currentViolationCount == 2 -> 18000L
+                                        currentViolationCount == 3 -> 12000L
+                                        currentViolationCount == 4 -> 8000L
+                                        else -> 5000L
+                                    }
                                 }
                             }
-                            else -> {
-                                when {
-                                    currentViolationCount <= 1 -> 25000L
-                                    currentViolationCount == 2 -> 18000L
-                                    currentViolationCount == 3 -> 12000L
-                                    currentViolationCount == 4 -> 8000L
-                                    else -> 5000L
+
+                            val shouldNotify = (currentForegroundApp != lastNotifiedPackage) ||
+                                    (now - lastNotificationTime >= intervalMillis)
+
+                            if (shouldNotify) {
+                                lastNotifiedPackage = currentForegroundApp
+                                lastNotificationTime = now
+                                currentViolationCount = settingsRepository.incrementViolationCount()
+
+                                if (userRole == UserRole.PARENT) {
+                                    // 親アカウント: お子様が余計なアプリを開いた回数を通知
+                                    sendParentAlertNotification(appName, currentViolationCount)
+                                } else {
+                                    // こども・個人: おかんの小言通知
+                                    sendOkanWarningNotification(
+                                        appName = appName,
+                                        taskName = customProhibition,
+                                        limitMinutes = limitMinutes,
+                                        violationCount = currentViolationCount,
+                                        mode = mode
+                                    )
                                 }
                             }
-                        }
-
-                        val shouldNotify = (currentForegroundApp != lastNotifiedPackage) ||
-                                (now - lastNotificationTime >= intervalMillis)
-
-                        if (shouldNotify) {
-                            lastNotifiedPackage = currentForegroundApp
-                            lastNotificationTime = now
-                            currentViolationCount = settingsRepository.incrementViolationCount()
-
-                            if (userRole == UserRole.PARENT) {
-                                // 親アカウント: お子様が余計なアプリを開いた回数を通知
-                                sendParentAlertNotification(appName, currentViolationCount)
-                            } else {
-                                // こども・個人: おかんの小言通知
-                                sendOkanWarningNotification(
-                                    appName = appName,
-                                    taskName = customProhibition,
-                                    limitMinutes = limitMinutes,
-                                    violationCount = currentViolationCount,
-                                    mode = mode
-                                )
+                        } else {
+                            if (currentForegroundApp == packageName || currentForegroundApp == launcherPackageName) {
+                                lastNotifiedPackage = null
                             }
-                        }
-                    } else {
-                        if (currentForegroundApp == packageName) {
-                            lastNotifiedPackage = null
                         }
                     }
                 } catch (_: Exception) {

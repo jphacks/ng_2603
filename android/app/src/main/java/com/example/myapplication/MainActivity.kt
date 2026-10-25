@@ -150,7 +150,7 @@ fun OkanApp() {
 
     // アプリ通知設定リスト（SharedPreferencesから永続化読み込み）
     var apps by remember {
-        mutableStateOf(loadAppsFromPrefs(appStatePrefs))
+        mutableStateOf(loadAppsFromPrefs(context, appStatePrefs))
     }
 
     // ホワイトリスト変更をリポジトリへ反映
@@ -164,7 +164,7 @@ fun OkanApp() {
     // アプリ設定の更新（SharedPreferencesへ即時保存 ＋ サービスへ同期）
     fun updateApps(newApps: List<AppNotificationTarget>) {
         apps = newApps
-        saveAppsToPrefs(appStatePrefs, newApps)
+        saveAppsToPrefs(context, appStatePrefs, newApps)
         syncWhitelist(newApps)
     }
 
@@ -660,7 +660,7 @@ fun OkanApp() {
 
 // --- 永続化用シリアライザ／デシリアライザ ---
 
-private fun saveAppsToPrefs(prefs: SharedPreferences, apps: List<AppNotificationTarget>) {
+private fun saveAppsToPrefs(context: Context, prefs: SharedPreferences, apps: List<AppNotificationTarget>) {
     try {
         val array = JSONArray()
         for (app in apps) {
@@ -671,13 +671,19 @@ private fun saveAppsToPrefs(prefs: SharedPreferences, apps: List<AppNotification
             obj.put("enabled", app.isEnabled)
             array.put(obj)
         }
-        prefs.edit().putString("saved_apps_json", array.toString()).commit()
+        val json = array.toString()
+        prefs.edit().putString("saved_apps_json", json).commit()
+        context.getSharedPreferences("guardian_settings_prefs", Context.MODE_PRIVATE)
+            .edit().putString("saved_apps_json", json).commit()
     } catch (_: Exception) {
     }
 }
 
-private fun loadAppsFromPrefs(prefs: SharedPreferences): List<AppNotificationTarget> {
-    val jsonStr = prefs.getString("saved_apps_json", null) ?: return defaultAppsList()
+private fun loadAppsFromPrefs(context: Context, prefs: SharedPreferences): List<AppNotificationTarget> {
+    val jsonStr = prefs.getString("saved_apps_json", null)
+        ?: context.getSharedPreferences("guardian_settings_prefs", Context.MODE_PRIVATE)
+            .getString("saved_apps_json", null)
+        ?: return defaultAppsList()
     return try {
         val array = JSONArray(jsonStr)
         val list = mutableListOf<AppNotificationTarget>()

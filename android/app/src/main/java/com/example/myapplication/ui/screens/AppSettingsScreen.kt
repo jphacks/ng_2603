@@ -94,7 +94,7 @@ fun AppSettingsScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "ホワイトリスト制：スイッチがONのアプリは、見守り時間中も通知が来ない（使用許可）アプリとして設定されます。",
+                text = "ホワイトリスト制：スイッチがONのアプリは使用中も通知を送りません（許可アプリ）。OFFのアプリは使用中に通知を送信します（監視対象）。",
                 fontSize = 12.sp,
                 color = OkanTextSecondary,
                 lineHeight = 18.sp
