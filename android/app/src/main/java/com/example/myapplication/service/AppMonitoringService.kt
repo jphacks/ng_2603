@@ -9,9 +9,11 @@ import com.example.myapplication.data.repository.SettingsRepositoryImpl
 import com.example.myapplication.domain.model.AvatarExpression
 import com.example.myapplication.domain.model.DisappointmentLevel
 import com.example.myapplication.domain.model.DisappointmentMessage
+import com.example.myapplication.domain.model.OkanMessageGenerator
 import com.example.myapplication.domain.model.UserRole
 import com.example.myapplication.domain.repository.ScreenTimeRepository
 import com.example.myapplication.domain.repository.SettingsRepository
+import com.example.myapplication.ui.model.OkanPersonality
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -28,6 +30,7 @@ import kotlinx.coroutines.launch
  * - やめない場合だんだん通知間隔が短縮し頻度が増加（割合）
  * - ホワイトリスト登録アプリは通知対象から除外
  * - 親アカウントの場合は「子供が余計なアプリを開いた回数」を記録・通知
+ * - 性格モード（激アマ・標準・鬼）に応じたリアルなお母さん口調のセリフ通知
  */
 class AppMonitoringService : Service() {
 
@@ -86,15 +89,23 @@ class AppMonitoringService : Service() {
                     val mode = settingsRepository.monitoringModeFlow.first()
                     val userRole = settingsRepository.userRoleFlow.first()
                     val whitelist = settingsRepository.whitelistPackagesFlow.first()
+                    val personalityStr = settingsRepository.personalityFlow.first()
+                    val personality = try {
+                        OkanPersonality.valueOf(personalityStr)
+                    } catch (_: Exception) {
+                        OkanPersonality.STANDARD
+                    }
 
                     val elapsed = now - startTime
                     val isLimitExceeded = (startTime > 0 && elapsed >= limitMillis)
                     val limitMinutes = (limitMillis / (60 * 1000)).toInt()
+                    val elapsedMinutes = (elapsed / (60 * 1000)).toInt().coerceAtLeast(limitMinutes)
+                    val customProhibition = settingsRepository.customMessageFlow.first().orEmpty()
 
                     // 1. 制限時間が来たら最初の通知
                     if (isLimitExceeded && !hasSentTimeUpNotification && startTime > 0) {
                         hasSentTimeUpNotification = true
-                        sendTimeUpNotification(limitMinutes, userRole)
+                        sendTimeUpNotification(limitMinutes, userRole, personality, customProhibition)
                     }
 
                     // 2. モード別の監視判定
@@ -110,7 +121,6 @@ class AppMonitoringService : Service() {
 
                     // フォアグラウンドアプリのチェック
                     val currentForegroundApp = screenTimeRepository.getCurrentForegroundPackage()
-                    val customProhibition = settingsRepository.customMessageFlow.first().orEmpty()
 
                     // 自アプリ・ランチャー・ホワイトリスト許可アプリは除外
                     val isOtherAppRunning = currentForegroundApp != null &&
@@ -144,13 +154,14 @@ class AppMonitoringService : Service() {
                                 // 親アカウント: お子様が余計なアプリを開いた回数を通知
                                 sendParentAlertNotification(appName, currentViolationCount)
                             } else {
-                                // こども・個人: おかんの小言通知
+                                // こども・個人: お母さん（おかん）からの小言通知
                                 sendOkanWarningNotification(
                                     appName = appName,
                                     taskName = customProhibition,
-                                    limitMinutes = limitMinutes,
+                                    elapsedMinutes = elapsedMinutes,
                                     violationCount = currentViolationCount,
-                                    mode = mode
+                                    mode = mode,
+                                    personality = personality
                                 )
                             }
                         }
@@ -170,25 +181,28 @@ class AppMonitoringService : Service() {
     /**
      * 制限時間に到達した瞬間の初回通知
      */
-    private fun sendTimeUpNotification(limitMinutes: Int, userRole: UserRole) {
-        val quote = if (userRole == UserRole.PARENT) {
-            "お子様の設定時間（${limitMinutes}分）が経過しました！"
+    private fun sendTimeUpNotification(
+        limitMinutes: Int,
+        userRole: UserRole,
+        personality: OkanPersonality,
+        taskName: String
+    ) {
+        if (userRole == UserRole.PARENT) {
+            val message = DisappointmentMessage(
+                level = DisappointmentLevel.LEVEL_2_SIGHING,
+                mainQuote = "お子様の設定時間（${limitMinutes}分）が経過しました！",
+                subQuote = "約束の時間が過ぎました。お子様のご様子をご確認ください。",
+                expression = AvatarExpression.SIGH
+            )
+            notificationHelper.showDisappointmentNotification(message, "タイマー", true)
         } else {
-            "約束の${limitMinutes}分が経ちました！スマホを置きなさい！"
+            val message = OkanMessageGenerator.createTimeUpMessage(
+                personality = personality,
+                taskName = taskName,
+                limitMinutes = limitMinutes
+            )
+            notificationHelper.showDisappointmentNotification(message, "タイマー", true)
         }
-
-        val message = DisappointmentMessage(
-            level = DisappointmentLevel.LEVEL_2_SIGHING,
-            mainQuote = quote,
-            subQuote = "時間になりました。これ以上使い続けるとおかんが怒ります！",
-            expression = AvatarExpression.SIGH
-        )
-
-        notificationHelper.showDisappointmentNotification(
-            message = message,
-            appName = "タイマー",
-            enableVibration = true
-        )
     }
 
     /**
@@ -197,7 +211,7 @@ class AppMonitoringService : Service() {
     private fun sendParentAlertNotification(appName: String, violationCount: Int) {
         val message = DisappointmentMessage(
             level = if (violationCount > 3) DisappointmentLevel.LEVEL_4_COLD_STARE else DisappointmentLevel.LEVEL_3_ANNOYED,
-            mainQuote = "【親通知】お子様が「$appName」を開きました！（合計: ${violationCount}回目）",
+            mainQuote = "お子様が「$appName」を開きました！（合計: ${violationCount}回目）",
             subQuote = "見守り時間中にお子様が他のアプリを操作しています。ご注意ください。",
             expression = AvatarExpression.GLARE
         )
@@ -210,51 +224,23 @@ class AppMonitoringService : Service() {
     }
 
     /**
-     * 違反継続時のお母さん（おかん）からの小言通知（回数に応じて激化）
+     * 違反継続時のお母さん（おかん）からの小言通知（性格 × 回数に応じて段階的にエスカレート）
      */
     private fun sendOkanWarningNotification(
         appName: String,
         taskName: String,
-        limitMinutes: Int,
+        elapsedMinutes: Int,
         violationCount: Int,
-        mode: String
+        mode: String,
+        personality: OkanPersonality
     ) {
-        val taskContext = if (taskName.isNotBlank() && taskName != "指定なし") "「$taskName」はどうしたん！？" else ""
-
-        val (quote, subQuote, level) = when {
-            violationCount <= 1 -> {
-                Triple(
-                    if (mode == "DURING_LIMIT") "見守り中やのに「$appName」開いてるやん！" else "約束の${limitMinutes}分過ぎたよ！「$appName」閉めなさい！",
-                    "$taskContext 今すぐスマホを置きなさい！",
-                    DisappointmentLevel.LEVEL_2_SIGHING
-                )
-            }
-            violationCount <= 3 -> {
-                Triple(
-                    "まだ「$appName」見てんの！？（${violationCount}回目やで！）",
-                    "$taskContext おかんの言うこと聞こえへんの！？早くやめなさい！",
-                    DisappointmentLevel.LEVEL_3_ANNOYED
-                )
-            }
-            else -> {
-                Triple(
-                    "いい加減にしなさい！！（激怒・${violationCount}回目）",
-                    "もう何も言いません。今すぐ画面を閉じなさい！！スマホ没収するよ！",
-                    DisappointmentLevel.LEVEL_4_COLD_STARE
-                )
-            }
-        }
-
-        val message = DisappointmentMessage(
-            level = level,
-            mainQuote = quote,
-            subQuote = subQuote,
-            expression = when (level) {
-                DisappointmentLevel.LEVEL_1_SUSPICIOUS -> AvatarExpression.DOUBT
-                DisappointmentLevel.LEVEL_2_SIGHING -> AvatarExpression.SIGH
-                DisappointmentLevel.LEVEL_3_ANNOYED -> AvatarExpression.GLARE
-                else -> AvatarExpression.COLD_STARE
-            }
+        val message = OkanMessageGenerator.createWarningMessage(
+            personality = personality,
+            appName = appName,
+            taskName = taskName,
+            elapsedMinutes = elapsedMinutes,
+            violationCount = violationCount,
+            mode = mode
         )
 
         notificationHelper.showDisappointmentNotification(

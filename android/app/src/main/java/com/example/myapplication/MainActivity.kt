@@ -46,6 +46,7 @@ import com.example.myapplication.data.repository.SettingsRepositoryImpl
 import com.example.myapplication.domain.model.AvatarExpression
 import com.example.myapplication.domain.model.DisappointmentLevel
 import com.example.myapplication.domain.model.DisappointmentMessage
+import com.example.myapplication.domain.model.OkanMessageGenerator
 import com.example.myapplication.service.AppMonitoringService
 import com.example.myapplication.service.NotificationHelper
 import com.example.myapplication.ui.components.OkanBottomBar
@@ -185,18 +186,13 @@ fun OkanApp() {
                 val elapsed = now - monitoringStartTime
 
                 if (monitoringStartTime > 0 && elapsed >= limitMillis) {
-                    val quote = when (currentPersonality) {
-                        OkanPersonality.SWEET -> "約束の${currentDurationMinutes}分過ぎたよ！がんばってスマホ置いてね？"
-                        OkanPersonality.STRICT -> "約束の${currentDurationMinutes}分過ぎてる！！今すぐ画面を閉じなさい！！"
-                        OkanPersonality.STANDARD -> "約束の${currentDurationMinutes}分過ぎたよ！スマホを置きなさい！"
-                    }
+                    val message = OkanMessageGenerator.createTimeUpMessage(
+                        personality = currentPersonality,
+                        taskName = currentProhibition,
+                        limitMinutes = currentDurationMinutes
+                    )
                     notificationHelper.showDisappointmentNotification(
-                        message = DisappointmentMessage(
-                            level = DisappointmentLevel.LEVEL_3_ANNOYED,
-                            mainQuote = quote,
-                            subQuote = "制限時間は終了しました！スマホを置きなさい！",
-                            expression = AvatarExpression.GLARE
-                        ),
+                        message = message,
                         appName = "スマートフォン",
                         enableVibration = true
                     )

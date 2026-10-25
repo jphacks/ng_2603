@@ -26,9 +26,9 @@ enum class UserRole(val title: String, val description: String) {
 }
 
 enum class OkanPersonality(val label: String, val description: String) {
-    SWEET("甘口", "かなり子供に甘いお母さんを想定しています"),
-    STANDARD("標準", "標準的なお母さんです"),
-    STRICT("鬼", "かなり鬼なお母さんです…")
+    SWEET("激アマ", "標準・王道のお母さん。やさしくなだめるように諭してくれます"),
+    STANDARD("標準", "関西おかん風。ちょい厳しめのリアルなツッコミで現実に戻します"),
+    STRICT("鬼", "丁寧だけど目が笑っていないお母さん。笑顔の奥に冷徹な怒りが宿る超厳しいお母さんです")
 }
 
 enum class MonitoringMode(val label: String, val description: String) {
