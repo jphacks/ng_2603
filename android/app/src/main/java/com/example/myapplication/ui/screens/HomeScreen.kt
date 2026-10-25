@@ -63,6 +63,7 @@ fun HomeScreen(
     userRole: UserRole = UserRole.INDIVIDUAL,
     durationMinutes: Int = 30,
     onPrepareMonitoringClick: () -> Unit,
+    onFinishMonitoringClick: () -> Unit = {},
     onStopMonitoringClick: () -> Unit,
     onResetStatusClick: () -> Unit = {}
 ) {
@@ -229,6 +230,27 @@ fun HomeScreen(
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
+
+                // 「見守り停止」ボタン（押すと見守り終了してスクリーンタイム画面に戻る）
+                Button(
+                    onClick = onFinishMonitoringClick,
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = OkanCardGray,
+                        contentColor = OkanTextPrimary
+                    )
+                ) {
+                    Text(
+                        text = "見守り停止",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // 赤い強制停止ボタン（アプリおよびバックグラウンドごと終了）
                 Button(

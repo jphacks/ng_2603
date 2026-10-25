@@ -457,6 +457,10 @@ fun OkanApp() {
                         onPrepareMonitoringClick = {
                             currentScreen = Screen.START_MONITORING
                         },
+                        onFinishMonitoringClick = {
+                            stopMonitoring()
+                            currentScreen = Screen.HOME
+                        },
                         onStopMonitoringClick = {
                             stopMonitoringAndExitApp()
                         },
