@@ -1,0 +1,6 @@
+2026/10/25-10:23:34.178 2824 Creating DB c:\Users\it262069.TSITCL\Documents\GitHub\ng_2603\.chrome_tmp2\Default\IndexedDB\https_www.figma.com_0.indexeddb.leveldb since it was missing.
+2026/10/25-10:23:34.302 2824 Reusing MANIFEST c:\Users\it262069.TSITCL\Documents\GitHub\ng_2603\.chrome_tmp2\Default\IndexedDB\https_www.figma.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/10/25-10:23:34.608 9d10 Level-0 table #5: started
+2026/10/25-10:23:34.642 9d10 Level-0 table #5: 4524 bytes OK
+2026/10/25-10:23:34.644 9d10 Delete type=0 #3
+2026/10/25-10:23:34.651 ab50 Manual compaction at level-0 from '\x00\x02\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at (end)
