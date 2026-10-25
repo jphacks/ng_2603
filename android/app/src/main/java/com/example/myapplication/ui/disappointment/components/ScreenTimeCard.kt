@@ -273,18 +273,6 @@ private fun HourlyStackedBarChart(
                 topLeft = Offset(textX, textY)
             )
         }
-
-        // 24時間目盛り（右端に「24」を表示）
-        val textLayout24 = textMeasurer.measure(
-            text = "24",
-            style = hourTextStyle
-        )
-        val text24X = (size.width - textLayout24.size.width).coerceAtLeast(0f)
-        val text24Y = baseY + 4.dp.toPx()
-        drawText(
-            textLayoutResult = textLayout24,
-            topLeft = Offset(text24X, text24Y)
-        )
     }
 }
 
