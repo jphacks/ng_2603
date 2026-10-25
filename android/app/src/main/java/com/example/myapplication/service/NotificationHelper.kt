@@ -147,4 +147,14 @@ class NotificationHelper(
             }
         }
     }
+
+    /**
+     * 全通知のキャンセル
+     */
+    fun cancelAll() {
+        try {
+            NotificationManagerCompat.from(context).cancelAll()
+        } catch (_: Exception) {
+        }
+    }
 }

@@ -143,12 +143,12 @@ class SettingsRepositoryImpl(
     }
 
     override suspend fun setMonitoringActive(active: Boolean) {
-        prefs.edit().putBoolean(KEY_IS_MONITORING_ACTIVE, active).apply()
+        prefs.edit().putBoolean(KEY_IS_MONITORING_ACTIVE, active).commit()
         _isMonitoringActiveFlow.value = active
     }
 
     override suspend fun setMonitoringStartTime(startTimeMillis: Long) {
-        prefs.edit().putLong(KEY_MONITORING_START_TIME, startTimeMillis).apply()
+        prefs.edit().putLong(KEY_MONITORING_START_TIME, startTimeMillis).commit()
         _monitoringStartTimeFlow.value = startTimeMillis
     }
 

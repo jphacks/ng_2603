@@ -156,9 +156,10 @@ fun OkanApp() {
         if (!savedMsg.isNullOrBlank()) {
             currentProhibition = savedMsg
         }
-        val savedActive = settingsRepository.isMonitoringActiveFlow.first()
-        isMonitoring = savedActive
-        monitoringStartTime = settingsRepository.monitoringStartTimeFlow.first()
+        val savedActiveInRepo = settingsRepository.isMonitoringActiveFlow.first()
+        val savedActiveInPrefs = appStatePrefs.getBoolean("is_monitoring", false)
+        isMonitoring = savedActiveInRepo && savedActiveInPrefs
+        monitoringStartTime = if (isMonitoring) settingsRepository.monitoringStartTimeFlow.first() else 0L
     }
 
     var showUsagePermissionDialog by remember { mutableStateOf(false) }
@@ -250,16 +251,28 @@ fun OkanApp() {
     }
 
     // 強制停止ボタン押下時: バックグラウンドサービス停止 + アプリ完全終了（プロセス終了）
+    // 次回起動時は見守り中ではなくスクリーンタイム画面（isMonitoring = false, currentScreen = Screen.HOME）が表示されるようにする
     fun stopMonitoringAndExitApp() {
         isMonitoring = false
         monitoringStartTime = 0L
-        saveUiState()
+        currentScreen = Screen.HOME
+        currentTab = TabItem.HOME
+
+        // commit() で即時確実にディスクへ書き込む
+        appStatePrefs.edit()
+            .putString("saved_screen", Screen.HOME.name)
+            .putString("saved_role", userRole.name)
+            .putBoolean("is_monitoring", false)
+            .putLong("monitoring_start_time", 0L)
+            .commit()
 
         coroutineScope.launch {
             settingsRepository.setMonitoringActive(false)
             settingsRepository.setMonitoringStartTime(0L)
             val intent = Intent(context, AppMonitoringService::class.java)
             context.stopService(intent)
+
+            notificationHelper.cancelAll()
 
             // アプリを完全に落とす
             (context as? Activity)?.finishAffinity()
