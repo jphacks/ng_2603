@@ -69,9 +69,12 @@ class NotificationHelper(
             .build()
     }
 
+    private var notificationAlertCounter = 0
+
     /**
      * おかんからの通知を送信
      * （※タップしてもアプリ画面に行かないようにContentIntentは設定しない）
+     * （※次から次へと届くように通知IDをローテーションさせて連続ポップアップ）
      */
     fun showDisappointmentNotification(
         message: DisappointmentMessage,
@@ -91,8 +94,9 @@ class NotificationHelper(
         }
 
         try {
+            val alertId = NOTIFICATION_ID_DISAPPOINTMENT_ALERT + (notificationAlertCounter++ % 15)
             NotificationManagerCompat.from(context).notify(
-                NOTIFICATION_ID_DISAPPOINTMENT_ALERT,
+                alertId,
                 builder.build()
             )
         } catch (_: SecurityException) {

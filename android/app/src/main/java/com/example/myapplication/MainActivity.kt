@@ -706,12 +706,12 @@ private fun loadAppsFromPrefs(context: Context, prefs: SharedPreferences): List<
 
 private fun defaultAppsList(): List<AppNotificationTarget> {
     return listOf(
-        AppNotificationTarget("1", "計算機", "com.android.calculator2", true),
-        AppNotificationTarget("2", "カレンダー", "com.android.calendar", true),
-        AppNotificationTarget("3", "電話", "com.android.dialer", true),
-        AppNotificationTarget("4", "YouTube", "com.google.android.youtube", false),
-        AppNotificationTarget("5", "X (Twitter)", "com.twitter.android", false),
-        AppNotificationTarget("6", "Instagram", "com.instagram.android", false)
+        AppNotificationTarget("1", "計算機", "com.android.calculator2", false),
+        AppNotificationTarget("2", "カレンダー", "com.android.calendar", false),
+        AppNotificationTarget("3", "電話", "com.android.dialer", false),
+        AppNotificationTarget("4", "YouTube", "com.google.android.youtube", true),
+        AppNotificationTarget("5", "X (Twitter)", "com.twitter.android", true),
+        AppNotificationTarget("6", "Instagram", "com.instagram.android", true)
     )
 }
 

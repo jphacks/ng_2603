@@ -138,9 +138,9 @@ class AppMonitoringService : Service() {
         }
 
         if (matched != null) {
-            // アプリ設定でオン（isEnabled == true）のアプリ: 通知は送らない (false)
-            // アプリ設定でオフ（isEnabled == false）のアプリ: 通知を送信する (true)
-            return !matched.isEnabled
+            // アプリ設定で「通知を許可（isEnabled == true）」にしているアプリ: 通知を送信する (true)
+            // アプリ設定で「通知なし（isEnabled == false）」にしているアプリ: 通知は送らない (false)
+            return matched.isEnabled
         }
 
         // 2. 設定一覧にないアプリ: ホワイトリストに含まれていれば通知しない
@@ -386,10 +386,31 @@ class AppMonitoringService : Service() {
                     DisappointmentLevel.LEVEL_4_COLD_STARE
                 )
             }
+            6 -> {
+                Triple(
+                    "【激怒】ええ加減にせぇよ！！（無視5回目）",
+                    "もうおかん知らんからね！今すぐ電源切りなさい！！スマホ没収や！！",
+                    DisappointmentLevel.LEVEL_4_COLD_STARE
+                )
+            }
+            7 -> {
+                Triple(
+                    "【超激怒】親の言うこと聞かんかい！！（無視6回目）",
+                    "今すぐスマホ手放しなさい！！直接部屋行くからね！！！",
+                    DisappointmentLevel.LEVEL_4_COLD_STARE
+                )
+            }
+            8 -> {
+                Triple(
+                    "【怒髪天】ええ加減にしぃやぁぁぁ！！！（無視7回目）",
+                    "おかんマジでキレたで！！画面閉じへんならWi-Fi切るよ！！！",
+                    DisappointmentLevel.LEVEL_4_COLD_STARE
+                )
+            }
             else -> {
                 Triple(
-                    "【激怒】ええ加減にせぇよ！！（${violationCount}回も無視！！）",
-                    "もうおかん知らんからね！今すぐ電源切りなさい！！スマホ没収や！！",
+                    "【最終警告】スマホ即時強制没収！！！（${violationCount}回無視）",
+                    "もう許しません！！今すぐ画面を閉じなさい！！！",
                     DisappointmentLevel.LEVEL_4_COLD_STARE
                 )
             }

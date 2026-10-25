@@ -172,23 +172,42 @@ class ScreenTimeRepositoryImpl(
         )
     }
 
+    private var lastKnownForegroundPackage: String? = null
+
     override suspend fun getCurrentForegroundPackage(): String? = withContext(Dispatchers.IO) {
         if (!hasUsageStatsPermission() || usageStatsManager == null) return@withContext null
 
         val endTime = System.currentTimeMillis()
-        val startTime = endTime - 10000
+        val startTime = endTime - 30000 // 過去30秒のイベントを確認
 
-        val usageEvents = usageStatsManager.queryEvents(startTime, endTime) ?: return@withContext null
-        var lastForegroundApp: String? = null
+        val usageEvents = usageStatsManager.queryEvents(startTime, endTime)
         val event = UsageEvents.Event()
 
-        while (usageEvents.hasNextEvent()) {
+        var latestResumedApp: String? = null
+
+        while (usageEvents != null && usageEvents.hasNextEvent()) {
             usageEvents.getNextEvent(event)
             if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
-                lastForegroundApp = event.packageName
+                latestResumedApp = event.packageName
             }
         }
-        lastForegroundApp
+
+        if (latestResumedApp != null) {
+            lastKnownForegroundPackage = latestResumedApp
+        } else {
+            // イベントがない場合、直近のUsageStatsから最も新しく使われたアプリをフォールバック確認
+            val stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                endTime - 30000,
+                endTime
+            )
+            val mostRecent = stats?.maxByOrNull { it.lastTimeUsed }
+            if (mostRecent != null && (endTime - mostRecent.lastTimeUsed) < 15000) {
+                lastKnownForegroundPackage = mostRecent.packageName
+            }
+        }
+
+        lastKnownForegroundPackage
     }
 
     override fun observeTotalRestrictedUsageMillis(): Flow<Long> = flow {
@@ -216,7 +235,7 @@ class ScreenTimeRepositoryImpl(
                     val pkg = obj.optString("desc", "")
                     val enabled = obj.optBoolean("enabled", false)
                     if (pkg.isNotBlank() && packageName.contains(pkg, ignoreCase = true)) {
-                        return !enabled
+                        return enabled
                     }
                 }
             } catch (_: Exception) {}

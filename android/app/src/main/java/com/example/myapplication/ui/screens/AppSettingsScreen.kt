@@ -94,7 +94,7 @@ fun AppSettingsScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "ホワイトリスト制：スイッチがONのアプリは使用中も通知を送りません（許可アプリ）。OFFのアプリは使用中に通知を送信します（監視対象）。",
+                text = "スイッチがONのアプリは、見守り中に開くとおかんから通知が届きます（通知を許可）。OFFのアプリは通知が届きません（許可アプリ）。",
                 fontSize = 12.sp,
                 color = OkanTextSecondary,
                 lineHeight = 18.sp
@@ -193,9 +193,9 @@ fun AppSettingsScreen(
                                         color = OkanTextPrimary
                                     )
                                     Text(
-                                        text = if (app.isEnabled) "通知なし（許可中）" else "通知あり（監視対象）",
+                                        text = if (app.isEnabled) "通知あり（開いたら通知が来ます）" else "通知なし（許可アプリ）",
                                         fontSize = 11.sp,
-                                        color = if (app.isEnabled) OkanPrimary else OkanTextSecondary
+                                        color = if (app.isEnabled) OkanDanger else OkanTextSecondary
                                     )
                                 }
                             }
