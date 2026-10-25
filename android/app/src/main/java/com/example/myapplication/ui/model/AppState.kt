@@ -26,14 +26,14 @@ enum class UserRole(val title: String, val description: String) {
 }
 
 enum class OkanPersonality(val label: String, val description: String) {
-    SWEET("激アマ", "標準・王道のお母さん。やさしくなだめるように諭してくれます"),
-    STANDARD("標準", "関西おかん風。ちょい厳しめのリアルなツッコミで現実に戻します"),
-    STRICT("鬼", "丁寧だけど目が笑っていないお母さん。笑顔の奥に冷徹な怒りが宿る超厳しいお母さんです")
+    SWEET("激アマ", "かなり子供に甘いお母さんを想定しています"),
+    STANDARD("普通", "標準的なお母さんです"),
+    STRICT("鬼", "かなり鬼なお母さんです…")
 }
 
 enum class MonitoringMode(val label: String, val description: String) {
-    AFTER_LIMIT("経過後に開始", "指定した時間が経過した後に通知・見守りを開始します"),
-    DURING_LIMIT("期間中見守る", "指定した時間の間ずっと余計なアプリの使用を見守ります")
+    AFTER_LIMIT("経過後通知", "指定した時間が経過した後に通知・見守りを開始します"),
+    DURING_LIMIT("時間内使用で通知", "指定した時間内でスマホを触っていたら即時通知します")
 }
 
 data class PresetSetting(

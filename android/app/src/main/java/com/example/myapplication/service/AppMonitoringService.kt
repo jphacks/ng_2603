@@ -71,6 +71,7 @@ class AppMonitoringService : Service() {
         monitoringJob?.cancel()
         monitoringJob = serviceScope.launch {
             while (isActive) {
+                var loopDelay = 1200L
                 try {
                     val isActiveMonitoring = settingsRepository.isMonitoringActiveFlow.first()
                     if (!isActiveMonitoring) {
@@ -95,7 +96,12 @@ class AppMonitoringService : Service() {
                     val isLimitExceeded = (startTime > 0 && elapsed >= limitMillis)
                     val limitMinutes = (limitMillis / (60 * 1000)).toInt()
 
-                    // 1. 制限時間が来たら最初の通知
+                    // 「時間内使用で通知」モードの場合は高速検知
+                    if (mode == "DURING_LIMIT") {
+                        loopDelay = 800L
+                    }
+
+                    // 1. 制限時間が来たら最初の通知（経過後通知モード時）
                     if (isLimitExceeded && !hasSentTimeUpNotification && startTime > 0) {
                         hasSentTimeUpNotification = true
                         sendTimeUpNotification(limitMinutes, userRole)
@@ -103,7 +109,7 @@ class AppMonitoringService : Service() {
 
                     // 2. モード別の監視判定
                     val shouldMonitorNow = when (mode) {
-                        "DURING_LIMIT" -> !isLimitExceeded // 期間中見守る
+                        "DURING_LIMIT" -> !isLimitExceeded // 選択した時間内でスマホを触っていたら即時通知
                         else -> isLimitExceeded // 経過後に開始（デフォルト）
                     }
 
@@ -126,14 +132,26 @@ class AppMonitoringService : Service() {
                     if (isOtherAppRunning) {
                         val appName = getAppName(currentForegroundApp!!)
 
-                        // 通知間隔を違反回数に応じて割合的に短縮（通知頻度が段階的に急増）
-                        // 1回目: 25秒 -> 2回目: 18秒 -> 3回目: 12秒 -> 4回目: 8秒 -> 5回目以降: 5秒
+                        // 通知間隔の制御
+                        // - 「時間内使用で通知」: 時間内でスマホを触っていたら即時通知 & 継続使用時も数秒間隔で連続通知
+                        // - 「経過後通知」: だんだん通知が増えていく割合的短縮（25s -> 18s -> 12s -> 8s -> 5s）
                         val intervalMillis = when {
-                            currentViolationCount <= 1 -> 25000L
-                            currentViolationCount == 2 -> 18000L
-                            currentViolationCount == 3 -> 12000L
-                            currentViolationCount == 4 -> 8000L
-                            else -> 5000L
+                            mode == "DURING_LIMIT" -> {
+                                when {
+                                    currentViolationCount <= 1 -> 5000L
+                                    currentViolationCount == 2 -> 4000L
+                                    else -> 3000L
+                                }
+                            }
+                            else -> {
+                                when {
+                                    currentViolationCount <= 1 -> 25000L
+                                    currentViolationCount == 2 -> 18000L
+                                    currentViolationCount == 3 -> 12000L
+                                    currentViolationCount == 4 -> 8000L
+                                    else -> 5000L
+                                }
+                            }
                         }
 
                         val shouldNotify = (currentForegroundApp != lastNotifiedPackage) ||
@@ -166,7 +184,7 @@ class AppMonitoringService : Service() {
                 } catch (_: Exception) {
                 }
 
-                delay(1200L)
+                delay(loopDelay)
             }
         }
     }

@@ -16,12 +16,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
-import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -36,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.domain.model.AppUsageInfo
 import com.example.myapplication.domain.repository.HourlyScreenTime
-import com.example.myapplication.ui.theme.OkanCardGray
 import com.example.myapplication.ui.theme.OkanDanger
 import com.example.myapplication.ui.theme.OkanPrimary
 import com.example.myapplication.ui.theme.OkanPrimaryContainer
@@ -49,10 +46,11 @@ import com.example.myapplication.ui.theme.OkanTextSecondary
  * - 通知を無視した回数
  * - 見守り時間内の他事の時間
  * - 1時間ごとの縦積み棒グラフ（通常利用時間 + 他事時間）
+ * （※「アプリ別スクリーンタイム」は非表示）
  */
 @Composable
 fun ScreenTimeCard(
-    apps: List<AppUsageInfo>,
+    apps: List<AppUsageInfo> = emptyList(),
     hourlyData: List<HourlyScreenTime> = emptyList(),
     ignoredNotificationCount: Int = 0,
     totalDistractionMinutes: Int = 0,
@@ -182,31 +180,7 @@ fun ScreenTimeCard(
                     .height(130.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // アプリ別リスト
-            Text(
-                text = "アプリ別スクリーンタイム",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = OkanTextPrimary
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            if (apps.isEmpty()) {
-                Text(
-                    text = "監視対象アプリの利用記録はありません",
-                    fontSize = 12.sp,
-                    color = OkanTextSecondary,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            } else {
-                apps.take(3).forEach { app ->
-                    AppUsageRow(app = app)
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
-            }
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
@@ -289,69 +263,5 @@ private fun getDummyHourlyData(): List<HourlyScreenTime> {
         }
         val distract = (total * 0.45).toInt()
         HourlyScreenTime(h, total, distract)
-    }
-}
-
-@Composable
-private fun AppUsageRow(app: AppUsageInfo) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(OkanPrimaryContainer),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Phone,
-                contentDescription = null,
-                tint = OkanPrimary,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = app.appName,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "${app.usedMinutes}分",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (app.usagePercentage >= 1.0f) OkanDanger else OkanTextPrimary
-                )
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // プログレスバー
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color(0xFFEEEEEE))
-            ) {
-                val progressFraction = (app.usedTimeMillis.toFloat() / (60 * 60 * 1000)).coerceIn(0f, 1f)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progressFraction)
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(if (progressFraction >= 1.0f) OkanDanger else OkanPrimary)
-                )
-            }
-        }
     }
 }
