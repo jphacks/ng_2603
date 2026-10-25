@@ -222,25 +222,18 @@ class AppMonitoringService : Service() {
 
                         if (shouldNotifyThisApp) {
                             // 通知間隔の制御
-                            // - 「時間内使用で通知」: 時間内でスマホを触っていたら即時通知 & 継続使用時も数秒間隔で連続通知
-                            // - 「経過後通知」: だんだん通知が増えていく割合的短縮（25s -> 18s -> 12s -> 8s -> 5s）
-                            val intervalMillis = when {
-                                mode == "DURING_LIMIT" -> {
-                                    when {
-                                        currentViolationCount <= 1 -> 5000L
-                                        currentViolationCount == 2 -> 4000L
-                                        else -> 3000L
-                                    }
+                            // - 設定時間が過ぎたら次から次へと10秒おきに通知
+                            // - 「時間内使用で通知」モードの場合: 触っていたら即時通知 & 数秒おきに連続通知
+                            val intervalMillis = if (isLimitExceeded) {
+                                10000L // 設定時間が過ぎたら10秒おきに通知
+                            } else if (mode == "DURING_LIMIT") {
+                                when {
+                                    currentViolationCount <= 1 -> 5000L
+                                    currentViolationCount == 2 -> 4000L
+                                    else -> 3000L
                                 }
-                                else -> {
-                                    when {
-                                        currentViolationCount <= 1 -> 25000L
-                                        currentViolationCount == 2 -> 18000L
-                                        currentViolationCount == 3 -> 12000L
-                                        currentViolationCount == 4 -> 8000L
-                                        else -> 5000L
-                                    }
-                                }
+                            } else {
+                                10000L
                             }
 
                             val shouldNotify = (currentForegroundApp != lastNotifiedPackage) ||
