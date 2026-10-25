@@ -1,6 +1,5 @@
 package com.example.myapplication.ui.components
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -8,6 +7,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,7 +28,6 @@ import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,15 +46,15 @@ import com.example.myapplication.ui.theme.OkanPrimary
 import com.example.myapplication.ui.theme.OkanPrimaryContainer
 import com.example.myapplication.ui.theme.OkanTextPrimary
 import com.example.myapplication.ui.theme.OkanTextSecondary
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 /**
- * 制限時間セット用のドラムロール・ダイヤルピッカー
- * - 「分」が00のときはそれ以上上にスクロール・「^」を押しても反応しない（最小値0で停止）
- * - 急激な増減や誤動作のない安定したドラムロールスクロール
- * - クイック選択チップとの正確な連動
+ * 制限時間セット用のダイヤルピッカー
+ * - 0未満には絶対に下がらない（最小値0で停止）
+ * - 上ボタンで増加、下ボタンで減少
+ * - 「2時間」ボタンを削除（15分, 30分, 45分, 1時間）
+ * - スクロールとボタン操作が安定して連動
  */
 @Composable
 fun DialTimePicker(
@@ -65,7 +64,7 @@ fun DialTimePicker(
     modifier: Modifier = Modifier
 ) {
     val hours = remember { (0..23).toList() }
-    val minutes = remember { (0..55 step 5).toList() } // 5分刻み (00, 05, 10 ... 55)
+    val minutes = remember { (0..55 step 5).toList() } // 5分刻み (0, 5, 10 ... 55)
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -83,20 +82,20 @@ fun DialTimePicker(
             WheelDialColumn(
                 label = "時間",
                 values = hours,
-                selectedValue = selectedHour,
+                selectedValue = selectedHour.coerceIn(0, 23),
                 onValueSelected = { newHour ->
                     onTimeChanged(newHour, selectedMinute)
                 },
-                canStepUp = selectedHour > 0,
-                canStepDown = selectedHour < 23,
+                canStepUp = selectedHour < 23,
+                canStepDown = selectedHour > 0,
                 onStepUp = {
-                    if (selectedHour > 0) {
-                        onTimeChanged(selectedHour - 1, selectedMinute)
+                    if (selectedHour < 23) {
+                        onTimeChanged(selectedHour + 1, selectedMinute)
                     }
                 },
                 onStepDown = {
-                    if (selectedHour < 23) {
-                        onTimeChanged(selectedHour + 1, selectedMinute)
+                    if (selectedHour > 0) {
+                        onTimeChanged(selectedHour - 1, selectedMinute)
                     }
                 }
             )
@@ -122,37 +121,35 @@ fun DialTimePicker(
                 onValueSelected = { newMin ->
                     onTimeChanged(selectedHour, newMin)
                 },
-                canStepUp = selectedMinute > 0, // 00のときはそれ以上上に行かない
-                canStepDown = selectedMinute < 55,
+                canStepUp = selectedMinute < 55,
+                canStepDown = selectedMinute > 0, // 0のときはそれ以上減らせない
                 onStepUp = {
-                    // 00 のときはそれ以上上に行かない（反応しない）
-                    if (selectedMinute > 0) {
-                        val newMin = (selectedMinute - 5).coerceAtLeast(0)
+                    if (selectedMinute < 55) {
+                        val newMin = (selectedMinute + 5).coerceAtMost(55)
                         onTimeChanged(selectedHour, newMin)
                     }
                 },
                 onStepDown = {
-                    if (selectedMinute < 55) {
-                        val newMin = (selectedMinute + 5).coerceAtMost(55)
+                    if (selectedMinute > 0) {
+                        val newMin = (selectedMinute - 5).coerceAtLeast(0)
                         onTimeChanged(selectedHour, newMin)
                     }
                 }
             )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        // クイック選択チップ
+        // クイック選択チップ（※「2時間」ボタンは削除）
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.padding(horizontal = 16.dp)
         ) {
             listOf(
                 "15分" to (0 to 15),
                 "30分" to (0 to 30),
                 "45分" to (0 to 45),
-                "1時間" to (1 to 0),
-                "2時間" to (2 to 0)
+                "1時間" to (1 to 0)
             ).forEach { (label, time) ->
                 val isSelected = selectedHour == time.first && selectedMinute == time.second
                 SuggestionChip(
@@ -181,7 +178,6 @@ fun DialTimePicker(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WheelDialColumn(
     label: String,
@@ -195,15 +191,14 @@ private fun WheelDialColumn(
     modifier: Modifier = Modifier
 ) {
     val itemHeight: Dp = 40.dp
-    val visibleItemsCount = 3
-    val totalHeight = itemHeight * visibleItemsCount
+    val totalHeight: Dp = itemHeight * 3
 
     val targetIndex = values.indexOf(selectedValue).coerceIn(0, values.size - 1)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
     val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
     val coroutineScope = rememberCoroutineScope()
 
-    // 外部（クイックチップやステップボタン）から selectedValue が変更されたときの同期
+    // 外部（チップや上下ボタン）からの変更時にスクロールを同期
     LaunchedEffect(selectedValue) {
         val idx = values.indexOf(selectedValue)
         if (idx in values.indices && !listState.isScrollInProgress) {
@@ -213,10 +208,10 @@ private fun WheelDialColumn(
         }
     }
 
-    // スクロール停止時のみ中央（firstVisibleItemIndex）の値を確定（フィードバックループ防止）
+    // スクロール停止時に選択値を確定（0未満や最大超過なし）
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
-            .filter { !it } // スクロールが停止した瞬間
+            .filter { !it }
             .collect {
                 val centerIdx = listState.firstVisibleItemIndex.coerceIn(0, values.size - 1)
                 val value = values[centerIdx]
@@ -230,24 +225,24 @@ private fun WheelDialColumn(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
     ) {
-        // 上ボタン（▲ / ^）: canStepUp が false のときは無効化（00のときは反応しない）
+        // 上ボタン（▲）: 数値を増やす (+1/+5)
         IconButton(
             onClick = onStepUp,
             enabled = canStepUp,
-            modifier = Modifier.size(30.dp)
+            modifier = Modifier.size(32.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowUp,
-                contentDescription = "$label を減らす",
+                contentDescription = "$label を増やす",
                 tint = if (canStepUp) OkanTextPrimary else OkanTextSecondary.copy(alpha = 0.25f),
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(24.dp)
             )
         }
 
         // ホイール表示領域
         Box(
             modifier = Modifier
-                .width(76.dp)
+                .width(80.dp)
                 .height(totalHeight),
             contentAlignment = Alignment.Center
         ) {
@@ -263,16 +258,12 @@ private fun WheelDialColumn(
             LazyColumn(
                 state = listState,
                 flingBehavior = snapFlingBehavior,
+                contentPadding = PaddingValues(vertical = itemHeight),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(totalHeight),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // 上部ダミー余白
-                item {
-                    Box(modifier = Modifier.height(itemHeight))
-                }
-
                 items(values.size) { index ->
                     val value = values[index]
                     val isSelected = (value == selectedValue)
@@ -301,25 +292,20 @@ private fun WheelDialColumn(
                         )
                     }
                 }
-
-                // 下部ダミー余白
-                item {
-                    Box(modifier = Modifier.height(itemHeight))
-                }
             }
         }
 
-        // 下ボタン（▼）
+        // 下ボタン（▼）: 数値を減らす (-1/-5)（0で停止）
         IconButton(
             onClick = onStepDown,
             enabled = canStepDown,
-            modifier = Modifier.size(30.dp)
+            modifier = Modifier.size(32.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "$label を増やす",
+                contentDescription = "$label を減らす",
                 tint = if (canStepDown) OkanTextPrimary else OkanTextSecondary.copy(alpha = 0.25f),
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(24.dp)
             )
         }
 

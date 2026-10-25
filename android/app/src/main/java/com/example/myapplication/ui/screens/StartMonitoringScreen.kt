@@ -39,10 +39,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.ui.components.DialTimePicker
 import com.example.myapplication.ui.components.OkanTopBar
+import com.example.myapplication.ui.model.MonitoringMode
 import com.example.myapplication.ui.model.OkanPersonality
 import com.example.myapplication.ui.theme.OkanBackground
 import com.example.myapplication.ui.theme.OkanBorder
-import com.example.myapplication.ui.theme.OkanCardGray
 import com.example.myapplication.ui.theme.OkanPrimary
 import com.example.myapplication.ui.theme.OkanPrimaryContainer
 import com.example.myapplication.ui.theme.OkanSurface
@@ -51,16 +51,18 @@ import com.example.myapplication.ui.theme.OkanTextSecondary
 
 @Composable
 fun StartMonitoringScreen(
-    initialProhibition: String = "料理中にスマホいじっちゃダメ！",
+    initialProhibition: String = "",
     initialMinutes: Int = 30,
     initialPersonality: OkanPersonality = OkanPersonality.STANDARD,
-    onStartMonitoringClick: (prohibition: String, minutes: Int, personality: OkanPersonality) -> Unit,
+    initialMode: MonitoringMode = MonitoringMode.AFTER_LIMIT,
+    onStartMonitoringClick: (prohibition: String, minutes: Int, personality: OkanPersonality, mode: MonitoringMode) -> Unit,
     onBackClick: () -> Unit
 ) {
     var prohibitionText by remember { mutableStateOf(initialProhibition) }
     var selectedHour by remember { mutableIntStateOf(initialMinutes / 60) }
     var selectedMinute by remember { mutableIntStateOf(initialMinutes % 60) }
     var selectedPersonality by remember { mutableStateOf(initialPersonality) }
+    var selectedMode by remember { mutableStateOf(initialMode) }
 
     val scrollState = rememberScrollState()
 
@@ -76,7 +78,7 @@ fun StartMonitoringScreen(
             onBackClick = onBackClick
         )
 
-        // スクロール可能な全体領域（メニューバーが下にある状態で快適にスクロール可能）
+        // スクロール可能な全体領域
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -92,11 +94,59 @@ fun StartMonitoringScreen(
                 color = OkanTextPrimary
             )
 
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // 見守り方式のタブ分け（経過後に始めるのか / その期間見守ってもらうのか）
+            Text(
+                text = "見守りモード",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = OkanTextPrimary
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, OkanBorder, RoundedCornerShape(14.dp))
+                    .background(OkanSurface)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                MonitoringMode.values().forEach { mode ->
+                    val isSelected = selectedMode == mode
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isSelected) OkanPrimaryContainer else Color.Transparent)
+                            .clickable { selectedMode = mode }
+                    ) {
+                        Text(
+                            text = mode.label,
+                            fontSize = 14.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) OkanPrimary else OkanTextPrimary
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = selectedMode.description,
+                fontSize = 11.sp,
+                color = OkanTextSecondary,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 項目1: あなたに今やって欲しくないことは何？
+            // 項目1: 今から何をするの?（初期文なし、すぐ入力可能）
             Text(
-                text = "あなたに今やって欲しくないことは何？",
+                text = "今から何をするの?",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = OkanTextPrimary
@@ -105,7 +155,7 @@ fun StartMonitoringScreen(
             OutlinedTextField(
                 value = prohibitionText,
                 onValueChange = { prohibitionText = it },
-                placeholder = { Text("例: 料理中にスマホいじっちゃダメ！") },
+                placeholder = { Text("例: 勉強、読書、料理、仕事など") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(80.dp),
@@ -122,7 +172,7 @@ fun StartMonitoringScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 項目2: 制限時間セット（ドラムロール・ダイヤル式）
+            // 項目2: 制限時間セット（ドラムロール・ダイヤル式、0分可能）
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -143,7 +193,6 @@ fun StartMonitoringScreen(
             }
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ダイヤルピッカーコンポーネント（上下ダイヤル式）
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -199,19 +248,30 @@ fun StartMonitoringScreen(
                             text = personality.label,
                             fontSize = 14.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = OkanTextPrimary
+                            color = if (isSelected) OkanPrimary else OkanTextPrimary
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            // おかんタイプの説明文（小さな余白に小さい文字で表示）
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = selectedPersonality.description,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = OkanTextSecondary,
+                modifier = Modifier.padding(horizontal = 6.dp)
+            )
 
-            // 見守り開始ボタン（フォーム内に配置し、下に十分な余白を確保）
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 見守り開始ボタン（0分も可能、coerceAtLeast(0)）
             Button(
                 onClick = {
-                    val totalMinutes = (selectedHour * 60 + selectedMinute).coerceAtLeast(1)
-                    onStartMonitoringClick(prohibitionText, totalMinutes, selectedPersonality)
+                    val totalMinutes = (selectedHour * 60 + selectedMinute).coerceAtLeast(0)
+                    val effectiveProhibition = if (prohibitionText.isBlank()) "指定なし" else prohibitionText
+                    onStartMonitoringClick(effectiveProhibition, totalMinutes, selectedPersonality, selectedMode)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -235,7 +295,6 @@ fun StartMonitoringScreen(
                 )
             }
 
-            // メニューバーの上に被らない十分な下部余白
             Spacer(modifier = Modifier.height(36.dp))
         }
     }

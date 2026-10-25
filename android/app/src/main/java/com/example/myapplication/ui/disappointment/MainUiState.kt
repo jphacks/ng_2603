@@ -5,6 +5,7 @@ import com.example.myapplication.domain.model.AppUsageInfo
 import com.example.myapplication.domain.model.DisappointmentLevel
 import com.example.myapplication.domain.model.DisappointmentMessage
 import com.example.myapplication.domain.model.UserRole
+import com.example.myapplication.domain.repository.HourlyScreenTime
 import com.example.myapplication.domain.usecase.MathProblem
 
 @Immutable
@@ -19,6 +20,9 @@ data class MainUiState(
     val limitMillis: Long = 60L * 60 * 1000,
     val usagePercentage: Float = 0f,
     val topApps: List<AppUsageInfo> = emptyList(),
+    val hourlyData: List<HourlyScreenTime> = emptyList(),
+    val ignoredNotificationCount: Int = 0,
+    val totalDistractionMinutes: Int = 0,
     val hasUsagePermission: Boolean = false,
     val hasOverlayPermission: Boolean = false,
     val showWarningBanner: Boolean = false,

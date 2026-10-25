@@ -88,6 +88,7 @@ fun HomeScreen(
         OkanTopBar(
             title = when {
                 isMonitoring && userRole == UserRole.CHILD -> "見守り中（こども）"
+                isMonitoring && userRole == UserRole.PARENT -> "見守り中（親）"
                 isMonitoring -> "見守り中"
                 userRole == UserRole.PARENT -> "おかん通知（親）"
                 userRole == UserRole.CHILD -> "おかん通知（こども）"
@@ -229,7 +230,7 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(20.dp))
             }
         } else {
-            // 見守り実行中 / 警告状態（子供アカウント遷移先 or 見守り開始時）
+            // 見守り実行中 / 警告状態
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
@@ -246,7 +247,11 @@ fun HomeScreen(
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        text = if (userRole == UserRole.CHILD) "👶 こどもモード: 見守り中" else "👀 見守り中",
+                        text = when (userRole) {
+                            UserRole.CHILD -> "👶 こどもモード: 見守り中"
+                            UserRole.PARENT -> "👀 親モード: 見守り中"
+                            else -> "👀 見守り中"
+                        },
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = OkanPrimary
@@ -264,7 +269,7 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 赤い強制停止ボタン
+                // 赤い強制停止ボタン（アプリおよびバックグラウンドごと終了）
                 Button(
                     onClick = {
                         if (userRole == UserRole.CHILD) {
@@ -305,8 +310,9 @@ fun HomeScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
+                        // 親アカウントとその他で文言を切り替え
                         Text(
-                            text = "見守ります！！",
+                            text = if (userRole == UserRole.PARENT) "見守っています！！" else "見守ります！！",
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             color = OkanTextPrimary
@@ -315,7 +321,11 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
-                            text = "余計なアプリ見ちゃ\nだめよ！！",
+                            text = if (userRole == UserRole.PARENT) {
+                                "余計なアプリを見ていたら\nお知らせします！！"
+                            } else {
+                                "余計なアプリ見ちゃ\nだめよ！！"
+                            },
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             color = OkanTextPrimary,
@@ -347,7 +357,7 @@ fun HomeScreen(
                 Text(text = "見守りを強制停止しますか？", fontWeight = FontWeight.Bold)
             },
             text = {
-                Text(text = "親御様のスマートフォンに強制停止の通知が送信されます。")
+                Text(text = "見守りサービスを停止し、アプリを完全に終了します。")
             },
             confirmButton = {
                 Button(
@@ -357,7 +367,7 @@ fun HomeScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = OkanDanger)
                 ) {
-                    Text("停止する", color = OkanSurface)
+                    Text("停止して終了する", color = OkanSurface)
                 }
             },
             dismissButton = {

@@ -9,6 +9,7 @@ import com.example.myapplication.data.repository.SettingsRepositoryImpl
 import com.example.myapplication.domain.model.AvatarExpression
 import com.example.myapplication.domain.model.DisappointmentLevel
 import com.example.myapplication.domain.model.DisappointmentMessage
+import com.example.myapplication.domain.model.UserRole
 import com.example.myapplication.domain.repository.ScreenTimeRepository
 import com.example.myapplication.domain.repository.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
@@ -22,8 +23,11 @@ import kotlinx.coroutines.launch
 
 /**
  * バックグラウンド常時実行・アプリ監視サービス
- * - 制限時間が過ぎるまでは通知を送らない
- * - 制限時間経過後に、このアプリ以外のアプリ（YouTube, SNS, ゲーム等）を開いたときにお母さんからの小言・警告通知を送信する
+ * - 「時間経過後に開始」/「期間中見守る」の2つのモードに対応
+ * - 制限時間が来たら最初の通知を送信
+ * - やめない場合だんだん通知間隔が短縮し頻度が増加（割合）
+ * - ホワイトリスト登録アプリは通知対象から除外
+ * - 親アカウントの場合は「子供が余計なアプリを開いた回数」を記録・通知
  */
 class AppMonitoringService : Service() {
 
@@ -36,8 +40,8 @@ class AppMonitoringService : Service() {
     private var lastNotifiedPackage: String? = null
     private var lastNotificationTime: Long = 0
     private var currentViolationCount = 0
+    private var hasSentTimeUpNotification = false
 
-    // ランチャー（ホーム画面）のパッケージ名
     private var launcherPackageName: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -70,99 +74,172 @@ class AppMonitoringService : Service() {
                     val isActiveMonitoring = settingsRepository.isMonitoringActiveFlow.first()
                     if (!isActiveMonitoring) {
                         lastNotifiedPackage = null
-                        delay(3000)
+                        currentViolationCount = 0
+                        hasSentTimeUpNotification = false
+                        delay(2000)
                         continue
                     }
 
                     val now = System.currentTimeMillis()
                     val startTime = settingsRepository.monitoringStartTimeFlow.first()
                     val limitMillis = settingsRepository.limitTimeMillisFlow.first()
+                    val mode = settingsRepository.monitoringModeFlow.first()
+                    val userRole = settingsRepository.userRoleFlow.first()
+                    val whitelist = settingsRepository.whitelistPackagesFlow.first()
 
-                    // 経過時間の計算
                     val elapsed = now - startTime
-
-                    // ★重要仕様: 制限時間が過ぎるまでは通知を送らない！時間経過後に送る
                     val isLimitExceeded = (startTime > 0 && elapsed >= limitMillis)
+                    val limitMinutes = (limitMillis / (60 * 1000)).toInt()
 
-                    if (!isLimitExceeded) {
-                        // 制限時間内は通知を送らずに見守りを継続
-                        delay(2000L)
+                    // 1. 制限時間が来たら最初の通知
+                    if (isLimitExceeded && !hasSentTimeUpNotification && startTime > 0) {
+                        hasSentTimeUpNotification = true
+                        sendTimeUpNotification(limitMinutes, userRole)
+                    }
+
+                    // 2. モード別の監視判定
+                    val shouldMonitorNow = when (mode) {
+                        "DURING_LIMIT" -> !isLimitExceeded // 期間中見守る
+                        else -> isLimitExceeded // 経過後に開始（デフォルト）
+                    }
+
+                    if (!shouldMonitorNow) {
+                        delay(1500L)
                         continue
                     }
 
-                    // 制限時間を過ぎた！フォアグラウンドアプリをチェック
+                    // フォアグラウンドアプリのチェック
                     val currentForegroundApp = screenTimeRepository.getCurrentForegroundPackage()
-                    val customProhibition = settingsRepository.customMessageFlow.first() ?: "料理中にスマホいじっちゃダメ！"
-                    val limitMinutes = (limitMillis / (60 * 1000)).toInt()
+                    val customProhibition = settingsRepository.customMessageFlow.first().orEmpty()
 
-                    // 自アプリおよびホーム画面（ランチャー）以外を開いた場合を「他のアプリを開いた」と判定
+                    // 自アプリ・ランチャー・ホワイトリスト許可アプリは除外
                     val isOtherAppRunning = currentForegroundApp != null &&
                             currentForegroundApp != packageName &&
                             currentForegroundApp != launcherPackageName &&
-                            !currentForegroundApp.contains("launcher", ignoreCase = true)
+                            !currentForegroundApp.contains("launcher", ignoreCase = true) &&
+                            !whitelist.contains(currentForegroundApp)
 
                     if (isOtherAppRunning) {
                         val appName = getAppName(currentForegroundApp!!)
 
-                        // 他のアプリに切り替わった瞬間、または前回の通知から15秒以上経過している場合に発火
+                        // 通知間隔を違反回数に応じて割合的に短縮（通知頻度が段階的に急増）
+                        // 1回目: 25秒 -> 2回目: 18秒 -> 3回目: 12秒 -> 4回目: 8秒 -> 5回目以降: 5秒
+                        val intervalMillis = when {
+                            currentViolationCount <= 1 -> 25000L
+                            currentViolationCount == 2 -> 18000L
+                            currentViolationCount == 3 -> 12000L
+                            currentViolationCount == 4 -> 8000L
+                            else -> 5000L
+                        }
+
                         val shouldNotify = (currentForegroundApp != lastNotifiedPackage) ||
-                                (now - lastNotificationTime >= 15000L)
+                                (now - lastNotificationTime >= intervalMillis)
 
                         if (shouldNotify) {
                             lastNotifiedPackage = currentForegroundApp
                             lastNotificationTime = now
-                            currentViolationCount++
+                            currentViolationCount = settingsRepository.incrementViolationCount()
 
-                            sendOkanWarningNotification(
-                                appName = appName,
-                                prohibition = customProhibition,
-                                limitMinutes = limitMinutes,
-                                violationCount = currentViolationCount
-                            )
+                            if (userRole == UserRole.PARENT) {
+                                // 親アカウント: お子様が余計なアプリを開いた回数を通知
+                                sendParentAlertNotification(appName, currentViolationCount)
+                            } else {
+                                // こども・個人: おかんの小言通知
+                                sendOkanWarningNotification(
+                                    appName = appName,
+                                    taskName = customProhibition,
+                                    limitMinutes = limitMinutes,
+                                    violationCount = currentViolationCount,
+                                    mode = mode
+                                )
+                            }
                         }
                     } else {
                         if (currentForegroundApp == packageName) {
-                            // 自アプリに戻ってきた
                             lastNotifiedPackage = null
                         }
                     }
                 } catch (_: Exception) {
-                    // 監視を継続
                 }
 
-                delay(1500L)
+                delay(1200L)
             }
         }
     }
 
     /**
-     * 制限時間経過後のお母さん（おかん）らしい説教・小言の通知を送信
+     * 制限時間に到達した瞬間の初回通知
+     */
+    private fun sendTimeUpNotification(limitMinutes: Int, userRole: UserRole) {
+        val quote = if (userRole == UserRole.PARENT) {
+            "お子様の設定時間（${limitMinutes}分）が経過しました！"
+        } else {
+            "約束の${limitMinutes}分が経ちました！スマホを置きなさい！"
+        }
+
+        val message = DisappointmentMessage(
+            level = DisappointmentLevel.LEVEL_2_SIGHING,
+            mainQuote = quote,
+            subQuote = "時間になりました。これ以上使い続けるとおかんが怒ります！",
+            expression = AvatarExpression.SIGH
+        )
+
+        notificationHelper.showDisappointmentNotification(
+            message = message,
+            appName = "タイマー",
+            enableVibration = true
+        )
+    }
+
+    /**
+     * 親向け通知: 子供が余計なアプリを開いた回数を通知
+     */
+    private fun sendParentAlertNotification(appName: String, violationCount: Int) {
+        val message = DisappointmentMessage(
+            level = if (violationCount > 3) DisappointmentLevel.LEVEL_4_COLD_STARE else DisappointmentLevel.LEVEL_3_ANNOYED,
+            mainQuote = "【親通知】お子様が「$appName」を開きました！（合計: ${violationCount}回目）",
+            subQuote = "見守り時間中にお子様が他のアプリを操作しています。ご注意ください。",
+            expression = AvatarExpression.GLARE
+        )
+
+        notificationHelper.showDisappointmentNotification(
+            message = message,
+            appName = appName,
+            enableVibration = true
+        )
+    }
+
+    /**
+     * 違反継続時のお母さん（おかん）からの小言通知（回数に応じて激化）
      */
     private fun sendOkanWarningNotification(
         appName: String,
-        prohibition: String,
+        taskName: String,
         limitMinutes: Int,
-        violationCount: Int
+        violationCount: Int,
+        mode: String
     ) {
+        val taskContext = if (taskName.isNotBlank() && taskName != "指定なし") "「$taskName」はどうしたん！？" else ""
+
         val (quote, subQuote, level) = when {
             violationCount <= 1 -> {
                 Triple(
-                    "約束の${limitMinutes}分過ぎたよ！「$appName」閉めなさい！",
-                    "「$prohibition」って言ったでしょ！時間過ぎてるよ！",
+                    if (mode == "DURING_LIMIT") "見守り中やのに「$appName」開いてるやん！" else "約束の${limitMinutes}分過ぎたよ！「$appName」閉めなさい！",
+                    "$taskContext 今すぐスマホを置きなさい！",
                     DisappointmentLevel.LEVEL_2_SIGHING
                 )
             }
             violationCount <= 3 -> {
                 Triple(
-                    "まだ「$appName」見てんの！？",
-                    "制限時間はとっくに過ぎてるんやからね！今すぐスマホを置きなさい！",
+                    "まだ「$appName」見てんの！？（${violationCount}回目やで！）",
+                    "$taskContext おかんの言うこと聞こえへんの！？早くやめなさい！",
                     DisappointmentLevel.LEVEL_3_ANNOYED
                 )
             }
             else -> {
                 Triple(
-                    "いい加減にしなさい！！（激怒）",
-                    "もう何も言いません。今すぐ現実に戻りなさい！！スマホ没収するよ！",
+                    "いい加減にしなさい！！（激怒・${violationCount}回目）",
+                    "もう何も言いません。今すぐ画面を閉じなさい！！スマホ没収するよ！",
                     DisappointmentLevel.LEVEL_4_COLD_STARE
                 )
             }

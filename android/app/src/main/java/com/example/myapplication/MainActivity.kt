@@ -1,6 +1,7 @@
 package com.example.myapplication
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -49,7 +50,9 @@ import com.example.myapplication.service.AppMonitoringService
 import com.example.myapplication.service.NotificationHelper
 import com.example.myapplication.ui.components.OkanBottomBar
 import com.example.myapplication.ui.model.AppNotificationTarget
+import com.example.myapplication.ui.model.MonitoringMode
 import com.example.myapplication.ui.model.OkanPersonality
+import com.example.myapplication.ui.model.PresetSetting
 import com.example.myapplication.ui.model.QuietHour
 import com.example.myapplication.ui.model.Screen
 import com.example.myapplication.ui.model.SoundOption
@@ -68,6 +71,7 @@ import com.example.myapplication.ui.screens.WelcomeScreen
 import com.example.myapplication.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,18 +115,20 @@ fun OkanApp() {
     var isMonitoring by remember { mutableStateOf(appStatePrefs.getBoolean("is_monitoring", false)) }
     var userRole by remember { mutableStateOf(initialRole) }
 
+    // 初期文なしですぐに入力可能
     var currentProhibition by remember {
-        mutableStateOf(appStatePrefs.getString("current_prohibition", "料理中にスマホいじっちゃダメ！") ?: "料理中にスマホいじっちゃダメ！")
+        mutableStateOf(appStatePrefs.getString("current_prohibition", "") ?: "")
     }
     var currentDurationMinutes by remember {
         mutableIntStateOf(appStatePrefs.getInt("duration_minutes", 30))
     }
     var currentPersonality by remember { mutableStateOf(initialPersonality) }
+    var currentMode by remember { mutableStateOf(MonitoringMode.AFTER_LIMIT) }
     var monitoringStartTime by remember {
         mutableLongStateOf(appStatePrefs.getLong("monitoring_start_time", 0L))
     }
 
-    // 状態が変化するたびに永続化保存（アプリが落とされても画面・状態を完全維持）
+    // 状態の永続化
     fun saveUiState() {
         appStatePrefs.edit()
             .putString("saved_screen", currentScreen.name)
@@ -139,10 +145,10 @@ fun OkanApp() {
         saveUiState()
     }
 
-    // 起動時に親の設定があれば読み込んで反映
+    // 起動時に保存された状態を復元
     LaunchedEffect(Unit) {
         val savedLimit = settingsRepository.limitTimeMillisFlow.first()
-        if (savedLimit > 0) {
+        if (savedLimit >= 0) {
             currentDurationMinutes = (savedLimit / (60 * 1000)).toInt()
         }
         val savedMsg = settingsRepository.customMessageFlow.first()
@@ -171,7 +177,6 @@ fun OkanApp() {
     }
 
     // アプリがバックグラウンドに移動した際のフォールバック通知
-    // ★重要仕様: 制限時間が過ぎるまでは通知を送らない！経過後にのみ通知
     DisposableEffect(lifecycleOwner, isMonitoring, currentProhibition, monitoringStartTime, currentDurationMinutes) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && isMonitoring) {
@@ -179,18 +184,17 @@ fun OkanApp() {
                 val limitMillis = currentDurationMinutes * 60 * 1000L
                 val elapsed = now - monitoringStartTime
 
-                // 制限時間を過ぎている場合のみ通知！
                 if (monitoringStartTime > 0 && elapsed >= limitMillis) {
                     val quote = when (currentPersonality) {
                         OkanPersonality.SWEET -> "約束の${currentDurationMinutes}分過ぎたよ！がんばってスマホ置いてね？"
                         OkanPersonality.STRICT -> "約束の${currentDurationMinutes}分過ぎてる！！今すぐ画面を閉じなさい！！"
-                        OkanPersonality.STANDARD -> "約束の${currentDurationMinutes}分過ぎたよ！「$currentProhibition」って言ったでしょ！"
+                        OkanPersonality.STANDARD -> "約束の${currentDurationMinutes}分過ぎたよ！スマホを置きなさい！"
                     }
                     notificationHelper.showDisappointmentNotification(
                         message = DisappointmentMessage(
                             level = DisappointmentLevel.LEVEL_3_ANNOYED,
                             mainQuote = quote,
-                            subQuote = "制限時間はとっくに終了しました！スマホを置きなさい！",
+                            subQuote = "制限時間は終了しました！スマホを置きなさい！",
                             expression = AvatarExpression.GLARE
                         ),
                         appName = "スマートフォン",
@@ -206,11 +210,17 @@ fun OkanApp() {
     }
 
     // 見守り開始ヘルパー関数
-    fun startMonitoring(prohibition: String, minutes: Int, personality: OkanPersonality) {
+    fun startMonitoring(
+        prohibition: String,
+        minutes: Int,
+        personality: OkanPersonality,
+        mode: MonitoringMode = MonitoringMode.AFTER_LIMIT
+    ) {
         val now = System.currentTimeMillis()
         currentProhibition = prohibition
         currentDurationMinutes = minutes
         currentPersonality = personality
+        currentMode = mode
         isMonitoring = true
         monitoringStartTime = now
         saveUiState()
@@ -221,6 +231,7 @@ fun OkanApp() {
             settingsRepository.setLimitTimeMillis(minutes * 60 * 1000L)
             settingsRepository.setMonitoringStartTime(now)
             settingsRepository.setPersonality(personality.name)
+            settingsRepository.setMonitoringMode(mode.name)
             settingsRepository.setUserRole(
                 when (userRole) {
                     UserRole.INDIVIDUAL -> com.example.myapplication.domain.model.UserRole.INDIVIDUAL
@@ -236,14 +247,31 @@ fun OkanApp() {
             } catch (_: Exception) {
             }
 
-            // 使用統計権限がなければダイアログを促す
             if (!screenTimeRepository.hasUsageStatsPermission()) {
                 showUsagePermissionDialog = true
             }
         }
     }
 
-    // 見守り停止ヘルパー関数
+    // 強制停止ボタン押下時: バックグラウンドサービス停止 + アプリ完全終了（プロセス終了）
+    fun stopMonitoringAndExitApp() {
+        isMonitoring = false
+        monitoringStartTime = 0L
+        saveUiState()
+
+        coroutineScope.launch {
+            settingsRepository.setMonitoringActive(false)
+            settingsRepository.setMonitoringStartTime(0L)
+            val intent = Intent(context, AppMonitoringService::class.java)
+            context.stopService(intent)
+
+            // アプリを完全に落とす
+            (context as? Activity)?.finishAffinity()
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+    }
+
+    // 通常の停止
     fun stopMonitoring() {
         isMonitoring = false
         monitoringStartTime = 0L
@@ -257,15 +285,39 @@ fun OkanApp() {
         }
     }
 
-    // アプリ通知設定リスト
+    // マイセットリスト（初期登録）
+    var presets by remember {
+        mutableStateOf(
+            listOf(
+                PresetSetting("1", "マイセット1（勉強）", "勉強", 45, OkanPersonality.STANDARD, MonitoringMode.AFTER_LIMIT),
+                PresetSetting("2", "マイセット2（読書）", "読書", 30, OkanPersonality.SWEET, MonitoringMode.AFTER_LIMIT),
+                PresetSetting("3", "マイセット3（集中仕事）", "仕事", 60, OkanPersonality.STRICT, MonitoringMode.DURING_LIMIT),
+                PresetSetting("4", "マイセット4（就寝前）", "スマホを見ない", 0, OkanPersonality.STRICT, MonitoringMode.AFTER_LIMIT),
+                PresetSetting("5", "マイセット5（休憩）", "休憩", 15, OkanPersonality.STANDARD, MonitoringMode.AFTER_LIMIT)
+            )
+        )
+    }
+
+    // アプリ通知設定リスト（ホワイトリスト制: isEnabled == true のアプリは通知を送らない）
     var apps by remember {
         mutableStateOf(
             listOf(
-                AppNotificationTarget("1", "Google", "Googleアカウント設定", true),
-                AppNotificationTarget("2", "X", "デフォルト設定", true),
-                AppNotificationTarget("3", "Instagram", "Instagramアカウント設定", true)
+                AppNotificationTarget("1", "計算機", "com.android.calculator2", true),
+                AppNotificationTarget("2", "カレンダー", "com.android.calendar", true),
+                AppNotificationTarget("3", "電話", "com.android.dialer", true),
+                AppNotificationTarget("4", "YouTube", "com.google.android.youtube", false),
+                AppNotificationTarget("5", "X (Twitter)", "com.twitter.android", false),
+                AppNotificationTarget("6", "Instagram", "com.instagram.android", false)
             )
         )
+    }
+
+    // ホワイトリスト変更をリポジトリへ反映
+    fun syncWhitelist(appList: List<AppNotificationTarget>) {
+        val whitelistPkgs = appList.filter { it.isEnabled }.map { it.description }.toSet()
+        coroutineScope.launch {
+            settingsRepository.updateWhitelistPackages(whitelistPkgs)
+        }
     }
 
     // 使わない時間帯リスト
@@ -276,6 +328,48 @@ fun OkanApp() {
                 QuietHour("2", "10:00 - 15:00", "月、火、水、木、金", true)
             )
         )
+    }
+
+    // 使わない時間帯に該当する場合、常時見守りモードを自動起動
+    LaunchedEffect(quietHours) {
+        val now = Calendar.getInstance()
+        val currentDay = when (now.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.SUNDAY -> "日"
+            Calendar.MONDAY -> "月"
+            Calendar.TUESDAY -> "火"
+            Calendar.WEDNESDAY -> "水"
+            Calendar.THURSDAY -> "木"
+            Calendar.FRIDAY -> "金"
+            Calendar.SATURDAY -> "土"
+            else -> ""
+        }
+        val currentMinOfDay = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+
+        val isQuietHourNow = quietHours.any { qh ->
+            if (!qh.isEnabled) return@any false
+            val dayMatch = qh.days.contains("毎日") || qh.days.contains(currentDay)
+            if (!dayMatch) return@any false
+
+            val parts = qh.timeRange.split("-").map { it.trim() }
+            if (parts.size == 2) {
+                val startParts = parts[0].split(":").mapNotNull { it.toIntOrNull() }
+                val endParts = parts[1].split(":").mapNotNull { it.toIntOrNull() }
+                if (startParts.size == 2 && endParts.size == 2) {
+                    val sMin = startParts[0] * 60 + startParts[1]
+                    val eMin = endParts[0] * 60 + endParts[1]
+                    if (sMin <= eMin) currentMinOfDay in sMin..eMin else (currentMinOfDay >= sMin || currentMinOfDay <= eMin)
+                } else false
+            } else false
+        }
+
+        if (isQuietHourNow && !isMonitoring) {
+            startMonitoring(
+                prohibition = "使わない時間帯（常時見守り）",
+                minutes = 0,
+                personality = currentPersonality,
+                mode = MonitoringMode.AFTER_LIMIT
+            )
+        }
     }
 
     // 通知音リスト
@@ -290,16 +384,11 @@ fun OkanApp() {
     }
     var selectedSoundId by remember { mutableStateOf("default") }
 
-    // 戻るボタンのハンドリング
     BackHandler(enabled = currentScreen != Screen.HOME && currentScreen != Screen.WELCOME) {
         when (currentScreen) {
             Screen.START_MONITORING -> currentScreen = Screen.HOME
-            Screen.QR_CODE -> {
-                currentScreen = Screen.WELCOME
-            }
-            Screen.SETTINGS_APP, Screen.SETTINGS_QUIET_HOURS, Screen.SETTINGS_NOTIFICATION -> {
-                currentScreen = Screen.SETTINGS
-            }
+            Screen.QR_CODE -> currentScreen = Screen.WELCOME
+            Screen.SETTINGS_APP, Screen.SETTINGS_QUIET_HOURS, Screen.SETTINGS_NOTIFICATION -> currentScreen = Screen.SETTINGS
             Screen.SETTINGS_SOUND -> currentScreen = Screen.SETTINGS_NOTIFICATION
             else -> {
                 currentScreen = Screen.HOME
@@ -308,8 +397,6 @@ fun OkanApp() {
         }
     }
 
-    // ★重要仕様: 見守り開始設定画面でもメニューバー（BottomBar）を固定表示！
-    // ウェルカム、QRコード、または子供見守り中画面のみ非表示
     val showBottomBar = currentScreen != Screen.WELCOME &&
             currentScreen != Screen.QR_CODE &&
             !(userRole == UserRole.CHILD && isMonitoring)
@@ -365,10 +452,10 @@ fun OkanApp() {
                             currentScreen = Screen.START_MONITORING
                         },
                         onStopMonitoringClick = {
-                            stopMonitoring()
+                            // 強制停止ボタン: アプリとバックグラウンドを落とす
+                            stopMonitoringAndExitApp()
                         },
                         onResetStatusClick = {
-                            // 三点リーダーからのステータス再設定
                             stopMonitoring()
                             currentScreen = Screen.WELCOME
                         }
@@ -380,8 +467,9 @@ fun OkanApp() {
                         initialProhibition = currentProhibition,
                         initialMinutes = currentDurationMinutes,
                         initialPersonality = currentPersonality,
-                        onStartMonitoringClick = { prohibition, minutes, personality ->
-                            startMonitoring(prohibition, minutes, personality)
+                        initialMode = currentMode,
+                        onStartMonitoringClick = { prohibition, minutes, personality, mode ->
+                            startMonitoring(prohibition, minutes, personality, mode)
                             currentScreen = Screen.HOME
                         },
                         onBackClick = {
@@ -391,10 +479,11 @@ fun OkanApp() {
                 }
 
                 Screen.MY_PRESETS -> {
+                    // 見守り設定の登録・管理画面
                     MyPresetsScreen(
-                        onPresetClick = { index ->
-                            currentProhibition = "マイセット $index の禁止事項"
-                            currentScreen = Screen.START_MONITORING
+                        presets = presets,
+                        onSavePreset = { updatedPreset ->
+                            presets = presets.map { if (it.id == updatedPreset.id) updatedPreset else it }
                         }
                     )
                 }
@@ -404,16 +493,15 @@ fun OkanApp() {
                         userRole = userRole,
                         onPairingCompleted = {
                             if (userRole == UserRole.PARENT) {
-                                // 親アカウントは設定を共有してホーム画面へ
                                 isMonitoring = false
                                 currentScreen = Screen.HOME
                                 currentTab = TabItem.HOME
                             } else {
-                                // 子供アカウントは親の設定を引き継いで見守り中画面へ
                                 startMonitoring(
-                                    prohibition = currentProhibition,
+                                    prohibition = currentProhibition.ifBlank { "こども見守り" },
                                     minutes = currentDurationMinutes,
-                                    personality = currentPersonality
+                                    personality = currentPersonality,
+                                    mode = currentMode
                                 )
                                 currentScreen = Screen.HOME
                                 currentTab = TabItem.HOME
@@ -444,10 +532,21 @@ fun OkanApp() {
                         apps = apps,
                         onToggleApp = { id ->
                             apps = apps.map { if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it }
+                            syncWhitelist(apps)
                         },
-                        onSelectAll = {
-                            val allEnabled = apps.all { it.isEnabled }
-                            apps = apps.map { it.copy(isEnabled = !allEnabled) }
+                        onAddApp = { name, pkg ->
+                            val newApp = AppNotificationTarget(
+                                id = (apps.size + 1).toString(),
+                                name = name,
+                                description = pkg,
+                                isEnabled = true
+                            )
+                            apps = apps + newApp
+                            syncWhitelist(apps)
+                        },
+                        onRemoveApp = { id ->
+                            apps = apps.filter { it.id != id }
+                            syncWhitelist(apps)
                         },
                         onBackClick = {
                             currentScreen = Screen.SETTINGS
@@ -460,6 +559,11 @@ fun OkanApp() {
                         quietHours = quietHours,
                         onToggleHour = { id ->
                             quietHours = quietHours.map { if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it }
+                        },
+                        onUpdateHour = { id, newRange, newDays ->
+                            quietHours = quietHours.map {
+                                if (it.id == id) it.copy(timeRange = newRange, days = newDays) else it
+                            }
                         },
                         onAddHourClick = {
                             quietHours = quietHours + QuietHour(
@@ -504,7 +608,6 @@ fun OkanApp() {
         }
     }
 
-    // 使用状況へのアクセス権限誘導ダイアログ
     if (showUsagePermissionDialog) {
         AlertDialog(
             onDismissRequest = { showUsagePermissionDialog = false },

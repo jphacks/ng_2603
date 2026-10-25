@@ -166,7 +166,12 @@ fun MainDisappointmentScreen() {
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // 6. スクリーンタイム詳細カード
-                ScreenTimeCard(apps = uiState.topApps)
+                ScreenTimeCard(
+                    apps = uiState.topApps,
+                    hourlyData = uiState.hourlyData,
+                    ignoredNotificationCount = uiState.ignoredNotificationCount,
+                    totalDistractionMinutes = uiState.totalDistractionMinutes
+                )
 
                 Spacer(modifier = Modifier.height(20.dp))
 

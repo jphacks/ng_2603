@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -62,6 +63,9 @@ class MainViewModel(
         )
 
         val usageList = screenTimeRepository.getTodayAppUsageList()
+        val hourlyList = screenTimeRepository.getHourlyScreenTime()
+        val violations = settingsRepository.violationCountFlow.first()
+        val distractionMins = hourlyList.sumOf { it.distractionMinutes }
         val hasUsagePerm = screenTimeRepository.hasUsageStatsPermission()
         val hasOverlayPerm = screenTimeRepository.hasOverlayPermission()
 
@@ -73,6 +77,9 @@ class MainViewModel(
             limitMillis = settings.limitMillis,
             usagePercentage = evaluation.usagePercentage,
             topApps = usageList,
+            hourlyData = hourlyList,
+            ignoredNotificationCount = violations,
+            totalDistractionMinutes = distractionMins,
             hasUsagePermission = hasUsagePerm,
             hasOverlayPermission = hasOverlayPerm,
             showWarningBanner = evaluation.level >= DisappointmentLevel.LEVEL_1_SUSPICIOUS,

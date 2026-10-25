@@ -1,5 +1,16 @@
 package com.example.myapplication.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -7,6 +18,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,17 +33,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,22 +52,34 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.myapplication.ui.components.OkanTopBar
+import com.example.myapplication.ui.model.MonitoringMode
+import com.example.myapplication.ui.model.OkanPersonality
 import com.example.myapplication.ui.model.UserRole
 import com.example.myapplication.ui.theme.OkanBackground
 import com.example.myapplication.ui.theme.OkanBorder
 import com.example.myapplication.ui.theme.OkanCardGray
 import com.example.myapplication.ui.theme.OkanPrimary
-import com.example.myapplication.ui.theme.OkanPrimaryContainer
 import com.example.myapplication.ui.theme.OkanSurface
 import com.example.myapplication.ui.theme.OkanTextPrimary
 import com.example.myapplication.ui.theme.OkanTextSecondary
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.common.InputImage
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
+import java.util.concurrent.Executors
 
 @Composable
 fun QrScreen(
@@ -63,8 +87,16 @@ fun QrScreen(
     onPairingCompleted: () -> Unit,
     onBackClick: () -> Unit
 ) {
-    // 親の場合はデフォルトでQR表示、子供の場合はカメラ読み込み
+    val context = LocalContext.current
     var isShowingQr by remember { mutableStateOf(userRole == UserRole.PARENT) }
+
+    // 親端末用のペアリング情報（QR埋め込み文字列）
+    val pairingPayload = "OKAN:PARENT:PAIR_839204:TIME_30:SWEET:AFTER"
+    val qrBitmap = remember(pairingPayload) {
+        generateQrBitmap(pairingPayload, 400, 400)
+    }
+
+    var scannedInfo by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -72,6 +104,7 @@ fun QrScreen(
             .background(OkanBackground)
     ) {
         OkanTopBar(
+            title = "端末連携設定",
             canNavigateBack = true,
             onBackClick = onBackClick
         )
@@ -83,7 +116,6 @@ fun QrScreen(
         ) {
             Spacer(modifier = Modifier.height(16.dp))
 
-            // タイトル
             Text(
                 text = if (userRole == UserRole.PARENT) "親と子供の共有設定（親）" else "親と子供の共有設定（こども）",
                 fontSize = 22.sp,
@@ -93,12 +125,11 @@ fun QrScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 説明文
             Text(
                 text = if (userRole == UserRole.PARENT) {
-                    "お子様のスマホの「おかん通知」でこのQRコードを読み取ってください。"
+                    "お子様のスマホのカメラでこのQRコードを読み取ってください。"
                 } else {
-                    "親御様のスマホに表示されたQRコードを枠内に合わせて読み取ってください。"
+                    "親御様のスマホに表示されたQRコードをカメラ枠内に収めてください。"
                 },
                 fontSize = 14.sp,
                 color = OkanTextSecondary,
@@ -160,10 +191,10 @@ fun QrScreen(
                     .weight(1f)
                     .clip(RoundedCornerShape(20.dp))
                     .background(OkanCardGray)
-                    .padding(20.dp)
+                    .padding(16.dp)
             ) {
                 if (isShowingQr) {
-                    // QRコード表示モード
+                    // 親端末：本物のQRコード画像を表示
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
@@ -171,18 +202,18 @@ fun QrScreen(
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(210.dp)
+                                .size(220.dp)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(OkanSurface)
+                                .background(Color.White)
                                 .border(1.dp, OkanBorder, RoundedCornerShape(16.dp))
-                                .padding(16.dp)
+                                .padding(12.dp)
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                // リアルなQRコード風Canvas
-                                QrCodeCanvas(modifier = Modifier.size(150.dp))
+                            if (qrBitmap != null) {
+                                Image(
+                                    bitmap = qrBitmap.asImageBitmap(),
+                                    contentDescription = "ペアリングQRコード",
+                                    modifier = Modifier.size(190.dp)
+                                )
                             }
                         }
 
@@ -190,36 +221,39 @@ fun QrScreen(
 
                         Text(
                             text = "ペアリングコード: 839-204",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
                             color = OkanTextPrimary
                         )
 
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = "お子様の端末で上記のQRコードをスキャンしてください",
+                            text = "お子様の端末のカメラでスキャンすると自動で同期されます",
                             fontSize = 12.sp,
                             color = OkanTextSecondary,
                             textAlign = TextAlign.Center
                         )
                     }
                 } else {
-                    // カメラ読み取りモード
-                    CameraScannerMock(
-                        onScanSimulated = onPairingCompleted
+                    // 子端末：リアルタイムCameraXカメラプレビュー＆QRスキャナー
+                    CameraQrScanner(
+                        onQrScanned = { rawPayload ->
+                            scannedInfo = rawPayload
+                            onPairingCompleted()
+                        }
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // ペアリング完了 / アクションボタン
             Button(
                 onClick = onPairingCompleted,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
+                    .height(54.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = OkanPrimary,
@@ -240,7 +274,7 @@ fun QrScreen(
                         text = if (userRole == UserRole.PARENT) {
                             "設定完了（ホームへ）"
                         } else {
-                            "読み取り完了（見守りを開始）"
+                            if (scannedInfo != null) "連携完了！（ホームへ）" else "読み取り完了（手動で完了）"
                         },
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
@@ -254,140 +288,179 @@ fun QrScreen(
 }
 
 /**
- * QRコードを模したCanvas描画
+ * CameraX + ML Kit によるリアルタイムQRコードスキャナーコンポーザブル
  */
 @Composable
-private fun QrCodeCanvas(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val gridSize = 19
-        val cellSize = size.width / gridSize
-
-        // 背景
-        drawRect(Color.White)
-
-        // 角の3つのマーカー（位置検出パターン）
-        fun drawFinderPattern(rowStart: Int, colStart: Int) {
-            // 外枠 7x7
-            drawRect(
-                color = Color.Black,
-                topLeft = Offset(colStart * cellSize, rowStart * cellSize),
-                size = Size(7 * cellSize, 7 * cellSize)
-            )
-            // 内側白 5x5
-            drawRect(
-                color = Color.White,
-                topLeft = Offset((colStart + 1) * cellSize, (rowStart + 1) * cellSize),
-                size = Size(5 * cellSize, 5 * cellSize)
-            )
-            // 中心黒 3x3
-            drawRect(
-                color = Color.Black,
-                topLeft = Offset((colStart + 2) * cellSize, (rowStart + 2) * cellSize),
-                size = Size(3 * cellSize, 3 * cellSize)
-            )
-        }
-
-        drawFinderPattern(0, 0)
-        drawFinderPattern(0, gridSize - 7)
-        drawFinderPattern(gridSize - 7, 0)
-
-        // ランダム風のデータドットパターン（固定シード）
-        val pattern = listOf(
-            0b1011001010110101001,
-            0b0100110101001011010,
-            0b1101001011010010111,
-            0b0010110100101101000,
-            0b1011010011010010101,
-            0b0100101100101101010,
-            0b1110010010110010111,
-            0b0101101010011010010,
-            0b1010010101100101101,
-            0b0110101100101101010,
-            0b1001010011010010101
+private fun CameraQrScanner(
+    onQrScanned: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         )
+    }
 
-        for (r in 8..(gridSize - 8)) {
-            val rowBits = pattern[(r - 8) % pattern.size]
-            for (c in 0 until gridSize) {
-                if ((rowBits and (1 shl (c % 19))) != 0) {
-                    drawRect(
-                        color = Color.Black,
-                        topLeft = Offset(c * cellSize, r * cellSize),
-                        size = Size(cellSize, cellSize)
-                    )
-                }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraExecutor.shutdown()
+        }
+    }
+
+    var scannedOnce by remember { mutableStateOf(false) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "scanLine")
+    val scanProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scanProgress"
+    )
+
+    if (hasCameraPermission) {
+        Box(
+            modifier = Modifier
+                .size(250.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .border(2.dp, OkanPrimary, RoundedCornerShape(18.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx)
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+
+                    cameraProviderFuture.addListener({
+                        val cameraProvider = cameraProviderFuture.get()
+                        val preview = Preview.Builder().build().also {
+                            it.setSurfaceProvider(previewView.surfaceProvider)
+                        }
+
+                        val options = BarcodeScannerOptions.Builder()
+                            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                            .build()
+                        val scanner = BarcodeScanning.getClient(options)
+
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
+
+                        imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy: ImageProxy ->
+                            val mediaImage = imageProxy.image
+                            if (mediaImage != null && !scannedOnce) {
+                                val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                                scanner.process(image)
+                                    .addOnSuccessListener { barcodes ->
+                                        for (barcode in barcodes) {
+                                            val rawValue = barcode.rawValue
+                                            if (!rawValue.isNullOrBlank() && !scannedOnce) {
+                                                scannedOnce = true
+                                                onQrScanned(rawValue)
+                                                break
+                                            }
+                                        }
+                                    }
+                                    .addOnCompleteListener {
+                                        imageProxy.close()
+                                    }
+                            } else {
+                                imageProxy.close()
+                            }
+                        }
+
+                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                        try {
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                cameraSelector,
+                                preview,
+                                imageAnalysis
+                            )
+                        } catch (_: Exception) {
+                        }
+                    }, ContextCompat.getMainExecutor(ctx))
+
+                    previewView
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // スキャン用レーザーライン
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val lineY = size.height * scanProgress
+                drawLine(
+                    color = Color(0xFF4A6EF5).copy(alpha = 0.85f),
+                    start = Offset(0f, lineY),
+                    end = Offset(size.width, lineY),
+                    strokeWidth = 3.dp.toPx()
+                )
+            }
+        }
+    } else {
+        // カメラ権限が未許可の場合の案内
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.CameraAlt,
+                contentDescription = null,
+                tint = OkanPrimary,
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "QRコードを読み取るには\nカメラの権限が必要です",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = OkanTextPrimary,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                colors = ButtonDefaults.buttonColors(containerColor = OkanPrimary)
+            ) {
+                Text("カメラを許可する")
             }
         }
     }
 }
 
 /**
- * カメラファインダー風のスキャン画面モック
+ * ZXing による QR コードビットマップ生成
  */
-@Composable
-private fun CameraScannerMock(
-    onScanSimulated: () -> Unit
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "scanLine")
-    val scanProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scanProgress"
-    )
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(200.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xFF1E2026))
-                .border(2.dp, OkanPrimary, RoundedCornerShape(16.dp))
-        ) {
-            // スキャンバー（上下移動アニメーション）
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val lineY = size.height * scanProgress
-                drawLine(
-                    color = Color(0xFF4A6EF5).copy(alpha = 0.8f),
-                    start = Offset(0f, lineY),
-                    end = Offset(size.width, lineY),
-                    strokeWidth = 4.dp.toPx()
-                )
-            }
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "📷",
-                    fontSize = 32.sp
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = "カメラ起動中...\nQRコードを枠に合わせてください",
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.85f),
-                    textAlign = TextAlign.Center,
-                    lineHeight = 18.sp
-                )
+private fun generateQrBitmap(content: String, width: Int, height: Int): Bitmap? {
+    return try {
+        val writer = QRCodeWriter()
+        val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, width, height)
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                bmp.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
             }
         }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        Text(
-            text = "親御様のスマホのQRコードを\nカメラの枠内に収めると自動認識されます",
-            fontSize = 12.sp,
-            color = OkanTextSecondary,
-            textAlign = TextAlign.Center,
-            lineHeight = 18.sp
-        )
+        bmp
+    } catch (_: Exception) {
+        null
     }
 }
