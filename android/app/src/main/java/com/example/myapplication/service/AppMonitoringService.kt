@@ -304,14 +304,37 @@ class AppMonitoringService : Service() {
     }
 
     /**
-     * 親向け通知: 子供が余計なアプリを開いた回数を通知
+     * 親向け通知: 子供が余計なアプリを開いた回数を通知（回数に応じて深刻度激化）
      */
     private fun sendParentAlertNotification(appName: String, violationCount: Int) {
+        val (quote, subQuote, level) = when {
+            violationCount <= 1 -> Triple(
+                "【親通知】お子様が「$appName」を開きました",
+                "見守り中にお子様が他のアプリを操作し始めました。",
+                DisappointmentLevel.LEVEL_1_SUSPICIOUS
+            )
+            violationCount in 2..3 -> Triple(
+                "【親通知】お子様が通知を無視して「$appName」を使用中（${violationCount}回目）",
+                "警告通知が届いているにもかかわらずアプリの操作を継続しています。",
+                DisappointmentLevel.LEVEL_3_ANNOYED
+            )
+            else -> Triple(
+                "【親警告】お子様が通知を${violationCount}回連続で無視しています！",
+                "「$appName」の使いすぎが続いています。直接お声がけをご検討ください。",
+                DisappointmentLevel.LEVEL_4_COLD_STARE
+            )
+        }
+
         val message = DisappointmentMessage(
-            level = if (violationCount > 3) DisappointmentLevel.LEVEL_4_COLD_STARE else DisappointmentLevel.LEVEL_3_ANNOYED,
-            mainQuote = "【親通知】お子様が「$appName」を開きました！（合計: ${violationCount}回目）",
-            subQuote = "見守り時間中にお子様が他のアプリを操作しています。ご注意ください。",
-            expression = AvatarExpression.GLARE
+            level = level,
+            mainQuote = quote,
+            subQuote = subQuote,
+            expression = when (level) {
+                DisappointmentLevel.LEVEL_1_SUSPICIOUS -> AvatarExpression.DOUBT
+                DisappointmentLevel.LEVEL_2_SIGHING -> AvatarExpression.SIGH
+                DisappointmentLevel.LEVEL_3_ANNOYED -> AvatarExpression.GLARE
+                else -> AvatarExpression.COLD_STARE
+            }
         )
 
         notificationHelper.showDisappointmentNotification(
@@ -322,7 +345,8 @@ class AppMonitoringService : Service() {
     }
 
     /**
-     * 違反継続時のお母さん（おかん）からの小言通知（回数に応じて激化）
+     * 違反継続時のお母さん（おかん）からの小言通知
+     * - 通知無視回数（違反回数）が増えるにつれて口調が段階的に激化
      */
     private fun sendOkanWarningNotification(
         appName: String,
@@ -333,25 +357,46 @@ class AppMonitoringService : Service() {
     ) {
         val taskContext = if (taskName.isNotBlank() && taskName != "指定なし") "「$taskName」はどうしたん！？" else ""
 
-        val (quote, subQuote, level) = when {
-            violationCount <= 1 -> {
+        val (quote, subQuote, level) = when (violationCount) {
+            1 -> {
                 Triple(
-                    if (mode == "DURING_LIMIT") "見守り中やのに「$appName」開いてるやん！" else "約束の${limitMinutes}分過ぎたよ！「$appName」閉めなさい！",
-                    "$taskContext 今すぐスマホを置きなさい！",
+                    if (mode == "DURING_LIMIT") "ちょっと！見守り中やのに「$appName」開いてるやん！" else "約束の${limitMinutes}分過ぎたよ！「$appName」閉めなさい！",
+                    "$taskContext 約束したやろ？今すぐスマホを置きなさい！",
+                    DisappointmentLevel.LEVEL_1_SUSPICIOUS
+                )
+            }
+            2 -> {
+                Triple(
+                    "通知見えてるよね？まだ「$appName」触ってんの！？（無視1回目）",
+                    "$taskContext おかんの小言、聞こえてるやろ！早く画面を閉じなさい！",
                     DisappointmentLevel.LEVEL_2_SIGHING
                 )
             }
-            violationCount <= 3 -> {
+            3 -> {
                 Triple(
-                    "まだ「$appName」見てんの！？（${violationCount}回目やで！）",
-                    "$taskContext おかんの言うこと聞こえへんの！？早くやめなさい！",
+                    "ええ加減にしなさい！まだ「$appName」見てるやん！（無視2回目）",
+                    "$taskContext おかん本気で怒るで！？今すぐスマホ置きなさい！！",
                     DisappointmentLevel.LEVEL_3_ANNOYED
+                )
+            }
+            4 -> {
+                Triple(
+                    "何回言わせんの！？今すぐ「$appName」やめんかい！！（無視3回目）",
+                    "$taskContext 何べん言ったらわかるん！？スマホばっかり見てんとやることやり！！",
+                    DisappointmentLevel.LEVEL_3_ANNOYED
+                )
+            }
+            5 -> {
+                Triple(
+                    "【警告】もう我慢の限界やで！！（無視4回目）",
+                    "次無視したらスマホ本気で没収するからね！今すぐ机に置きなさい！！",
+                    DisappointmentLevel.LEVEL_4_COLD_STARE
                 )
             }
             else -> {
                 Triple(
-                    "いい加減にしなさい！！（激怒・${violationCount}回目）",
-                    "もう何も言いません。今すぐ画面を閉じなさい！！スマホ没収するよ！",
+                    "【激怒】ええ加減にせぇよ！！（${violationCount}回も無視！！）",
+                    "もうおかん知らんからね！今すぐ電源切りなさい！！スマホ没収や！！",
                     DisappointmentLevel.LEVEL_4_COLD_STARE
                 )
             }

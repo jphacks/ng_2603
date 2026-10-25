@@ -123,7 +123,7 @@ fun OkanApp() {
         mutableStateOf(appStatePrefs.getString("current_prohibition", "") ?: "")
     }
     var currentDurationMinutes by remember {
-        mutableIntStateOf(appStatePrefs.getInt("duration_minutes", 30))
+        mutableIntStateOf(appStatePrefs.getInt("duration_minutes", 0))
     }
     var currentPersonality by remember { mutableStateOf(initialPersonality) }
     var currentMode by remember { mutableStateOf(MonitoringMode.AFTER_LIMIT) }

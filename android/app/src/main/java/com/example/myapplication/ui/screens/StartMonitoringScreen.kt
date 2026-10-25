@@ -59,7 +59,7 @@ import com.example.myapplication.ui.theme.OkanTextSecondary
 @Composable
 fun StartMonitoringScreen(
     initialProhibition: String = "",
-    initialMinutes: Int = 30,
+    initialMinutes: Int = 0,
     initialPersonality: OkanPersonality = OkanPersonality.STANDARD,
     initialMode: MonitoringMode = MonitoringMode.AFTER_LIMIT,
     onStartMonitoringClick: (prohibition: String, minutes: Int, personality: OkanPersonality, mode: MonitoringMode) -> Unit,

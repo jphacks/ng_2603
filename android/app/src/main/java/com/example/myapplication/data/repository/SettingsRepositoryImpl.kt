@@ -103,7 +103,7 @@ class SettingsRepositoryImpl(
     }
 
     private fun loadLimitMillis(): Long {
-        return prefs.getLong(KEY_LIMIT_TIME_MILLIS, 30L * 60 * 1000)
+        return prefs.getLong(KEY_LIMIT_TIME_MILLIS, 0L)
     }
 
     private fun loadCustomMessage(): String? {

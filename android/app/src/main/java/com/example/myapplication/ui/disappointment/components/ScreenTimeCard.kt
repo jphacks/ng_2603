@@ -29,7 +29,10 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.domain.model.AppUsageInfo
@@ -172,12 +175,12 @@ fun ScreenTimeCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 縦積み棒グラフ Canvas
+            // 縦積み棒グラフ Canvas (1時間ごとの24時間目盛り付き)
             HourlyStackedBarChart(
                 hourlyData = if (hourlyData.isNotEmpty()) hourlyData else getDummyHourlyData(),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(130.dp)
+                    .height(150.dp)
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -187,27 +190,36 @@ fun ScreenTimeCard(
 
 /**
  * 1時間ごとの縦積みバーチャート
+ * - 0〜23（各時間）および24時間目盛り数字をX軸に描画
  */
 @Composable
 private fun HourlyStackedBarChart(
     hourlyData: List<HourlyScreenTime>,
     modifier: Modifier = Modifier
 ) {
+    val textMeasurer = rememberTextMeasurer()
+    val hourTextStyle = TextStyle(
+        fontSize = 7.5.sp,
+        fontWeight = FontWeight.Medium,
+        color = OkanTextSecondary
+    )
+
     Canvas(modifier = modifier) {
         val totalBars = 24
         val maxMinutes = 60f // 1時間は最大60分
-        val barWidth = (size.width / totalBars) * 0.65f
+        val labelAreaHeight = 20.dp.toPx()
+        val baseY = size.height - labelAreaHeight
+        val chartHeight = baseY - 8.dp.toPx()
         val stepX = size.width / totalBars
+        val barWidth = stepX * 0.65f
 
-        // 基準線
+        // 基準線 (X軸)
         drawLine(
             color = Color(0xFFEEEEEE),
-            start = Offset(0f, size.height - 18.dp.toPx()),
-            end = Offset(size.width, size.height - 18.dp.toPx()),
+            start = Offset(0f, baseY),
+            end = Offset(size.width, baseY),
             strokeWidth = 1.dp.toPx()
         )
-
-        val chartHeight = size.height - 24.dp.toPx()
 
         for (h in 0 until totalBars) {
             val item = hourlyData.firstOrNull { it.hour == h }
@@ -216,7 +228,7 @@ private fun HourlyStackedBarChart(
             val normalMins = (totalMins - distractMins).coerceAtLeast(0f)
 
             val x = h * stepX + (stepX - barWidth) / 2f
-            val baseY = size.height - 18.dp.toPx()
+            val centerX = h * stepX + stepX / 2f
 
             if (totalMins > 0) {
                 // 1. 通常使用部分（Primary色）
@@ -247,7 +259,32 @@ private fun HourlyStackedBarChart(
                     cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
                 )
             }
+
+            // 1時間ごとの数字ラベル（0〜23）
+            val labelText = h.toString()
+            val textLayoutResult = textMeasurer.measure(
+                text = labelText,
+                style = hourTextStyle
+            )
+            val textX = centerX - (textLayoutResult.size.width / 2f)
+            val textY = baseY + 4.dp.toPx()
+            drawText(
+                textLayoutResult = textLayoutResult,
+                topLeft = Offset(textX, textY)
+            )
         }
+
+        // 24時間目盛り（右端に「24」を表示）
+        val textLayout24 = textMeasurer.measure(
+            text = "24",
+            style = hourTextStyle
+        )
+        val text24X = (size.width - textLayout24.size.width).coerceAtLeast(0f)
+        val text24Y = baseY + 4.dp.toPx()
+        drawText(
+            textLayoutResult = textLayout24,
+            topLeft = Offset(text24X, text24Y)
+        )
     }
 }
 
