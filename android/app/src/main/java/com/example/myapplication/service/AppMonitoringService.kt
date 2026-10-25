@@ -1,6 +1,7 @@
 package com.example.myapplication.service
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.IBinder
@@ -86,6 +87,9 @@ class AppMonitoringService : Service() {
                     val mode = settingsRepository.monitoringModeFlow.first()
                     val userRole = settingsRepository.userRoleFlow.first()
                     val whitelist = settingsRepository.whitelistPackagesFlow.first()
+                    val directWhitelist = applicationContext.getSharedPreferences("guardian_settings_prefs", Context.MODE_PRIVATE)
+                        .getStringSet("whitelist_packages", emptySet()).orEmpty()
+                    val combinedWhitelist = whitelist + directWhitelist
 
                     val elapsed = now - startTime
                     val isLimitExceeded = (startTime > 0 && elapsed >= limitMillis)
@@ -117,7 +121,7 @@ class AppMonitoringService : Service() {
                             currentForegroundApp != packageName &&
                             currentForegroundApp != launcherPackageName &&
                             !currentForegroundApp.contains("launcher", ignoreCase = true) &&
-                            !whitelist.contains(currentForegroundApp)
+                            !combinedWhitelist.contains(currentForegroundApp)
 
                     if (isOtherAppRunning) {
                         val appName = getAppName(currentForegroundApp!!)

@@ -16,16 +16,16 @@ class SettingsRepositoryImpl(
         context.getSharedPreferences("guardian_settings_prefs", Context.MODE_PRIVATE)
 
     companion object {
-        private const val KEY_USER_ROLE = "user_role"
-        private const val KEY_LIMIT_TIME_MILLIS = "limit_time_millis"
-        private const val KEY_CUSTOM_MESSAGE = "custom_message"
-        private const val KEY_BLACKLISTED_PACKAGES = "blacklisted_packages"
-        private const val KEY_WHITELIST_PACKAGES = "whitelist_packages"
-        private const val KEY_IS_MONITORING_ACTIVE = "is_monitoring_active"
-        private const val KEY_MONITORING_START_TIME = "monitoring_start_time"
-        private const val KEY_PERSONALITY = "okan_personality"
-        private const val KEY_MONITORING_MODE = "monitoring_mode"
-        private const val KEY_VIOLATION_COUNT = "violation_count"
+        const val KEY_USER_ROLE = "user_role"
+        const val KEY_LIMIT_TIME_MILLIS = "limit_time_millis"
+        const val KEY_CUSTOM_MESSAGE = "custom_message"
+        const val KEY_BLACKLISTED_PACKAGES = "blacklisted_packages"
+        const val KEY_WHITELIST_PACKAGES = "whitelist_packages"
+        const val KEY_IS_MONITORING_ACTIVE = "is_monitoring_active"
+        const val KEY_MONITORING_START_TIME = "monitoring_start_time"
+        const val KEY_PERSONALITY = "okan_personality"
+        const val KEY_MONITORING_MODE = "monitoring_mode"
+        const val KEY_VIOLATION_COUNT = "violation_count"
 
         private val DEFAULT_BLACKLIST = setOf(
             "com.google.android.youtube",
@@ -38,7 +38,8 @@ class SettingsRepositoryImpl(
             "com.android.calculator2",
             "com.google.android.calculator",
             "com.android.calendar",
-            "com.google.android.calendar"
+            "com.google.android.calendar",
+            "com.android.dialer"
         )
     }
 
@@ -71,6 +72,26 @@ class SettingsRepositoryImpl(
 
     private val _violationCountFlow = MutableStateFlow(loadViolationCount())
     override val violationCountFlow: Flow<Int> = _violationCountFlow.asStateFlow()
+
+    // SharedPreferencesの変更を監視し、別インスタンス（Service等）にも即座に変更を伝播
+    private val preferenceChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        when (key) {
+            KEY_USER_ROLE -> _userRoleFlow.value = loadUserRole()
+            KEY_LIMIT_TIME_MILLIS -> _limitTimeMillisFlow.value = loadLimitMillis()
+            KEY_CUSTOM_MESSAGE -> _customMessageFlow.value = loadCustomMessage()
+            KEY_BLACKLISTED_PACKAGES -> _blacklistedPackagesFlow.value = loadBlacklistedPackages()
+            KEY_WHITELIST_PACKAGES -> _whitelistPackagesFlow.value = loadWhitelistPackages()
+            KEY_IS_MONITORING_ACTIVE -> _isMonitoringActiveFlow.value = loadIsMonitoringActive()
+            KEY_MONITORING_START_TIME -> _monitoringStartTimeFlow.value = loadMonitoringStartTime()
+            KEY_PERSONALITY -> _personalityFlow.value = loadPersonality()
+            KEY_MONITORING_MODE -> _monitoringModeFlow.value = loadMonitoringMode()
+            KEY_VIOLATION_COUNT -> _violationCountFlow.value = loadViolationCount()
+        }
+    }
+
+    init {
+        prefs.registerOnSharedPreferenceChangeListener(preferenceChangeListener)
+    }
 
     private fun loadUserRole(): UserRole {
         val name = prefs.getString(KEY_USER_ROLE, UserRole.INDIVIDUAL.name)
@@ -118,27 +139,27 @@ class SettingsRepositoryImpl(
     }
 
     override suspend fun setUserRole(role: UserRole) {
-        prefs.edit().putString(KEY_USER_ROLE, role.name).apply()
+        prefs.edit().putString(KEY_USER_ROLE, role.name).commit()
         _userRoleFlow.value = role
     }
 
     override suspend fun setLimitTimeMillis(limitMillis: Long) {
-        prefs.edit().putLong(KEY_LIMIT_TIME_MILLIS, limitMillis).apply()
+        prefs.edit().putLong(KEY_LIMIT_TIME_MILLIS, limitMillis).commit()
         _limitTimeMillisFlow.value = limitMillis
     }
 
     override suspend fun setCustomMessage(message: String?) {
-        prefs.edit().putString(KEY_CUSTOM_MESSAGE, message).apply()
+        prefs.edit().putString(KEY_CUSTOM_MESSAGE, message).commit()
         _customMessageFlow.value = message
     }
 
     override suspend fun updateBlacklistedPackages(packages: Set<String>) {
-        prefs.edit().putStringSet(KEY_BLACKLISTED_PACKAGES, packages).apply()
+        prefs.edit().putStringSet(KEY_BLACKLISTED_PACKAGES, packages).commit()
         _blacklistedPackagesFlow.value = packages
     }
 
     override suspend fun updateWhitelistPackages(packages: Set<String>) {
-        prefs.edit().putStringSet(KEY_WHITELIST_PACKAGES, packages).apply()
+        prefs.edit().putStringSet(KEY_WHITELIST_PACKAGES, packages).commit()
         _whitelistPackagesFlow.value = packages
     }
 
@@ -153,24 +174,24 @@ class SettingsRepositoryImpl(
     }
 
     override suspend fun setPersonality(personality: String) {
-        prefs.edit().putString(KEY_PERSONALITY, personality).apply()
+        prefs.edit().putString(KEY_PERSONALITY, personality).commit()
         _personalityFlow.value = personality
     }
 
     override suspend fun setMonitoringMode(mode: String) {
-        prefs.edit().putString(KEY_MONITORING_MODE, mode).apply()
+        prefs.edit().putString(KEY_MONITORING_MODE, mode).commit()
         _monitoringModeFlow.value = mode
     }
 
     override suspend fun incrementViolationCount(): Int {
         val next = _violationCountFlow.value + 1
-        prefs.edit().putInt(KEY_VIOLATION_COUNT, next).apply()
+        prefs.edit().putInt(KEY_VIOLATION_COUNT, next).commit()
         _violationCountFlow.value = next
         return next
     }
 
     override suspend fun resetViolationCount() {
-        prefs.edit().putInt(KEY_VIOLATION_COUNT, 0).apply()
+        prefs.edit().putInt(KEY_VIOLATION_COUNT, 0).commit()
         _violationCountFlow.value = 0
     }
 }

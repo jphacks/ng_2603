@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -71,6 +72,8 @@ import com.example.myapplication.ui.screens.WelcomeScreen
 import com.example.myapplication.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
@@ -115,7 +118,6 @@ fun OkanApp() {
     var isMonitoring by remember { mutableStateOf(appStatePrefs.getBoolean("is_monitoring", false)) }
     var userRole by remember { mutableStateOf(initialRole) }
 
-    // 初期文なしですぐに入力可能
     var currentProhibition by remember {
         mutableStateOf(appStatePrefs.getString("current_prohibition", "") ?: "")
     }
@@ -145,7 +147,47 @@ fun OkanApp() {
         saveUiState()
     }
 
-    // 起動時に保存された状態を復元
+    // アプリ通知設定リスト（SharedPreferencesから永続化読み込み）
+    var apps by remember {
+        mutableStateOf(loadAppsFromPrefs(appStatePrefs))
+    }
+
+    // ホワイトリスト変更をリポジトリへ反映
+    fun syncWhitelist(appList: List<AppNotificationTarget>) {
+        val whitelistPkgs = appList.filter { it.isEnabled }.map { it.description }.toSet()
+        coroutineScope.launch {
+            settingsRepository.updateWhitelistPackages(whitelistPkgs)
+        }
+    }
+
+    // アプリ設定の更新（SharedPreferencesへ即時保存 ＋ サービスへ同期）
+    fun updateApps(newApps: List<AppNotificationTarget>) {
+        apps = newApps
+        saveAppsToPrefs(appStatePrefs, newApps)
+        syncWhitelist(newApps)
+    }
+
+    // マイセットリスト（SharedPreferencesから永続化読み込み）
+    var presets by remember {
+        mutableStateOf(loadPresetsFromPrefs(appStatePrefs))
+    }
+
+    fun updatePresets(newPresets: List<PresetSetting>) {
+        presets = newPresets
+        savePresetsToPrefs(appStatePrefs, newPresets)
+    }
+
+    // 使わない時間帯リスト（SharedPreferencesから永続化読み込み）
+    var quietHours by remember {
+        mutableStateOf(loadQuietHoursFromPrefs(appStatePrefs))
+    }
+
+    fun updateQuietHours(newHours: List<QuietHour>) {
+        quietHours = newHours
+        saveQuietHoursToPrefs(appStatePrefs, newHours)
+    }
+
+    // 起動時に保存された状態を復元 & ホワイトリストの初期同期
     LaunchedEffect(Unit) {
         val savedLimit = settingsRepository.limitTimeMillisFlow.first()
         if (savedLimit >= 0) {
@@ -159,6 +201,9 @@ fun OkanApp() {
         val savedActiveInPrefs = appStatePrefs.getBoolean("is_monitoring", false)
         isMonitoring = savedActiveInRepo && savedActiveInPrefs
         monitoringStartTime = if (isMonitoring) settingsRepository.monitoringStartTimeFlow.first() else 0L
+
+        // 現在のホワイトリストをサービス側に同期
+        syncWhitelist(apps)
     }
 
     var showUsagePermissionDialog by remember { mutableStateOf(false) }
@@ -255,14 +300,12 @@ fun OkanApp() {
     }
 
     // 強制停止ボタン押下時: バックグラウンドサービス停止 + アプリ完全終了（プロセス終了）
-    // 次回起動時は見守り中ではなくスクリーンタイム画面（isMonitoring = false, currentScreen = Screen.HOME）が表示されるようにする
     fun stopMonitoringAndExitApp() {
         isMonitoring = false
         monitoringStartTime = 0L
         currentScreen = Screen.HOME
         currentTab = TabItem.HOME
 
-        // commit() で即時確実にディスクへ書き込む
         appStatePrefs.edit()
             .putString("saved_screen", Screen.HOME.name)
             .putString("saved_role", userRole.name)
@@ -278,7 +321,6 @@ fun OkanApp() {
 
             notificationHelper.cancelAll()
 
-            // アプリを完全に落とす
             (context as? Activity)?.finishAffinity()
             android.os.Process.killProcess(android.os.Process.myPid())
         }
@@ -296,51 +338,6 @@ fun OkanApp() {
             val intent = Intent(context, AppMonitoringService::class.java)
             context.stopService(intent)
         }
-    }
-
-    // マイセットリスト（初期登録）
-    var presets by remember {
-        mutableStateOf(
-            listOf(
-                PresetSetting("1", "マイセット1（勉強）", "勉強", 45, OkanPersonality.STANDARD, MonitoringMode.AFTER_LIMIT),
-                PresetSetting("2", "マイセット2（読書）", "読書", 30, OkanPersonality.SWEET, MonitoringMode.AFTER_LIMIT),
-                PresetSetting("3", "マイセット3（集中仕事）", "仕事", 60, OkanPersonality.STRICT, MonitoringMode.DURING_LIMIT),
-                PresetSetting("4", "マイセット4（就寝前）", "スマホを見ない", 0, OkanPersonality.STRICT, MonitoringMode.AFTER_LIMIT),
-                PresetSetting("5", "マイセット5（休憩）", "休憩", 15, OkanPersonality.STANDARD, MonitoringMode.AFTER_LIMIT)
-            )
-        )
-    }
-
-    // アプリ通知設定リスト（ホワイトリスト制: isEnabled == true のアプリは通知を送らない）
-    var apps by remember {
-        mutableStateOf(
-            listOf(
-                AppNotificationTarget("1", "計算機", "com.android.calculator2", true),
-                AppNotificationTarget("2", "カレンダー", "com.android.calendar", true),
-                AppNotificationTarget("3", "電話", "com.android.dialer", true),
-                AppNotificationTarget("4", "YouTube", "com.google.android.youtube", false),
-                AppNotificationTarget("5", "X (Twitter)", "com.twitter.android", false),
-                AppNotificationTarget("6", "Instagram", "com.instagram.android", false)
-            )
-        )
-    }
-
-    // ホワイトリスト変更をリポジトリへ反映
-    fun syncWhitelist(appList: List<AppNotificationTarget>) {
-        val whitelistPkgs = appList.filter { it.isEnabled }.map { it.description }.toSet()
-        coroutineScope.launch {
-            settingsRepository.updateWhitelistPackages(whitelistPkgs)
-        }
-    }
-
-    // 使わない時間帯リスト
-    var quietHours by remember {
-        mutableStateOf(
-            listOf(
-                QuietHour("1", "00:00 - 07:00", "毎日", true),
-                QuietHour("2", "10:00 - 15:00", "月、火、水、木、金", true)
-            )
-        )
     }
 
     // 使わない時間帯に該当する場合、常時見守りモードを自動起動
@@ -465,7 +462,6 @@ fun OkanApp() {
                             currentScreen = Screen.START_MONITORING
                         },
                         onStopMonitoringClick = {
-                            // 強制停止ボタン: アプリとバックグラウンドを落とす
                             stopMonitoringAndExitApp()
                         },
                         onResetStatusClick = {
@@ -492,11 +488,11 @@ fun OkanApp() {
                 }
 
                 Screen.MY_PRESETS -> {
-                    // 見守り設定の登録・管理画面
                     MyPresetsScreen(
                         presets = presets,
                         onSavePreset = { updatedPreset ->
-                            presets = presets.map { if (it.id == updatedPreset.id) updatedPreset else it }
+                            val updated = presets.map { if (it.id == updatedPreset.id) updatedPreset else it }
+                            updatePresets(updated)
                         }
                     )
                 }
@@ -544,8 +540,8 @@ fun OkanApp() {
                     AppSettingsScreen(
                         apps = apps,
                         onToggleApp = { id ->
-                            apps = apps.map { if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it }
-                            syncWhitelist(apps)
+                            val updated = apps.map { if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it }
+                            updateApps(updated)
                         },
                         onAddApp = { name, pkg ->
                             val newApp = AppNotificationTarget(
@@ -554,12 +550,11 @@ fun OkanApp() {
                                 description = pkg,
                                 isEnabled = true
                             )
-                            apps = apps + newApp
-                            syncWhitelist(apps)
+                            updateApps(apps + newApp)
                         },
                         onRemoveApp = { id ->
-                            apps = apps.filter { it.id != id }
-                            syncWhitelist(apps)
+                            val updated = apps.filter { it.id != id }
+                            updateApps(updated)
                         },
                         onBackClick = {
                             currentScreen = Screen.SETTINGS
@@ -571,20 +566,23 @@ fun OkanApp() {
                     QuietHoursScreen(
                         quietHours = quietHours,
                         onToggleHour = { id ->
-                            quietHours = quietHours.map { if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it }
+                            val updated = quietHours.map { if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it }
+                            updateQuietHours(updated)
                         },
                         onUpdateHour = { id, newRange, newDays ->
-                            quietHours = quietHours.map {
+                            val updated = quietHours.map {
                                 if (it.id == id) it.copy(timeRange = newRange, days = newDays) else it
                             }
+                            updateQuietHours(updated)
                         },
                         onAddHourClick = {
-                            quietHours = quietHours + QuietHour(
+                            val updated = quietHours + QuietHour(
                                 id = (quietHours.size + 1).toString(),
                                 timeRange = "18:00 - 21:00",
                                 days = "土、日",
                                 isEnabled = true
                             )
+                            updateQuietHours(updated)
                         },
                         onBackClick = {
                             currentScreen = Screen.SETTINGS
@@ -658,6 +656,154 @@ fun OkanApp() {
             }
         )
     }
+}
+
+// --- 永続化用シリアライザ／デシリアライザ ---
+
+private fun saveAppsToPrefs(prefs: SharedPreferences, apps: List<AppNotificationTarget>) {
+    try {
+        val array = JSONArray()
+        for (app in apps) {
+            val obj = JSONObject()
+            obj.put("id", app.id)
+            obj.put("name", app.name)
+            obj.put("desc", app.description)
+            obj.put("enabled", app.isEnabled)
+            array.put(obj)
+        }
+        prefs.edit().putString("saved_apps_json", array.toString()).commit()
+    } catch (_: Exception) {
+    }
+}
+
+private fun loadAppsFromPrefs(prefs: SharedPreferences): List<AppNotificationTarget> {
+    val jsonStr = prefs.getString("saved_apps_json", null) ?: return defaultAppsList()
+    return try {
+        val array = JSONArray(jsonStr)
+        val list = mutableListOf<AppNotificationTarget>()
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            list.add(
+                AppNotificationTarget(
+                    id = obj.getString("id"),
+                    name = obj.getString("name"),
+                    description = obj.getString("desc"),
+                    isEnabled = obj.getBoolean("enabled")
+                )
+            )
+        }
+        if (list.isEmpty()) defaultAppsList() else list
+    } catch (_: Exception) {
+        defaultAppsList()
+    }
+}
+
+private fun defaultAppsList(): List<AppNotificationTarget> {
+    return listOf(
+        AppNotificationTarget("1", "計算機", "com.android.calculator2", true),
+        AppNotificationTarget("2", "カレンダー", "com.android.calendar", true),
+        AppNotificationTarget("3", "電話", "com.android.dialer", true),
+        AppNotificationTarget("4", "YouTube", "com.google.android.youtube", false),
+        AppNotificationTarget("5", "X (Twitter)", "com.twitter.android", false),
+        AppNotificationTarget("6", "Instagram", "com.instagram.android", false)
+    )
+}
+
+private fun savePresetsToPrefs(prefs: SharedPreferences, presets: List<PresetSetting>) {
+    try {
+        val array = JSONArray()
+        for (p in presets) {
+            val obj = JSONObject()
+            obj.put("id", p.id)
+            obj.put("title", p.title)
+            obj.put("task", p.task)
+            obj.put("minutes", p.minutes)
+            obj.put("personality", p.personality.name)
+            obj.put("mode", p.mode.name)
+            array.put(obj)
+        }
+        prefs.edit().putString("saved_presets_json", array.toString()).commit()
+    } catch (_: Exception) {
+    }
+}
+
+private fun loadPresetsFromPrefs(prefs: SharedPreferences): List<PresetSetting> {
+    val jsonStr = prefs.getString("saved_presets_json", null) ?: return defaultPresetsList()
+    return try {
+        val array = JSONArray(jsonStr)
+        val list = mutableListOf<PresetSetting>()
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            list.add(
+                PresetSetting(
+                    id = obj.getString("id"),
+                    title = obj.getString("title"),
+                    task = obj.getString("task"),
+                    minutes = obj.getInt("minutes"),
+                    personality = OkanPersonality.valueOf(obj.getString("personality")),
+                    mode = MonitoringMode.valueOf(obj.getString("mode"))
+                )
+            )
+        }
+        if (list.isEmpty()) defaultPresetsList() else list
+    } catch (_: Exception) {
+        defaultPresetsList()
+    }
+}
+
+private fun defaultPresetsList(): List<PresetSetting> {
+    return listOf(
+        PresetSetting("1", "マイセット1（勉強）", "勉強", 45, OkanPersonality.STANDARD, MonitoringMode.AFTER_LIMIT),
+        PresetSetting("2", "マイセット2（読書）", "読書", 30, OkanPersonality.SWEET, MonitoringMode.AFTER_LIMIT),
+        PresetSetting("3", "マイセット3（集中仕事）", "仕事", 60, OkanPersonality.STRICT, MonitoringMode.DURING_LIMIT),
+        PresetSetting("4", "マイセット4（就寝前）", "スマホを見ない", 0, OkanPersonality.STRICT, MonitoringMode.AFTER_LIMIT),
+        PresetSetting("5", "マイセット5（休憩）", "休憩", 15, OkanPersonality.STANDARD, MonitoringMode.AFTER_LIMIT)
+    )
+}
+
+private fun saveQuietHoursToPrefs(prefs: SharedPreferences, hours: List<QuietHour>) {
+    try {
+        val array = JSONArray()
+        for (h in hours) {
+            val obj = JSONObject()
+            obj.put("id", h.id)
+            obj.put("range", h.timeRange)
+            obj.put("days", h.days)
+            obj.put("enabled", h.isEnabled)
+            array.put(obj)
+        }
+        prefs.edit().putString("saved_quiet_hours_json", array.toString()).commit()
+    } catch (_: Exception) {
+    }
+}
+
+private fun loadQuietHoursFromPrefs(prefs: SharedPreferences): List<QuietHour> {
+    val jsonStr = prefs.getString("saved_quiet_hours_json", null) ?: return defaultQuietHoursList()
+    return try {
+        val array = JSONArray(jsonStr)
+        val list = mutableListOf<QuietHour>()
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            list.add(
+                QuietHour(
+                    id = obj.getString("id"),
+                    timeRange = obj.getString("range"),
+                    days = obj.getString("days"),
+                    isEnabled = obj.getBoolean("enabled")
+                )
+            )
+        }
+        if (list.isEmpty()) defaultQuietHoursList() else list
+    } catch (_: Exception) {
+        defaultQuietHoursList()
+    }
+}
+
+private fun defaultQuietHoursList(): List<QuietHour> {
+    return listOf(
+        QuietHour("1", "00:00 - 07:00", "毎日", true),
+        QuietHour("2", "10:00 - 15:00", "月、火、水、木、金", true)
+    )
 }
 
 @Preview(showBackground = true)
