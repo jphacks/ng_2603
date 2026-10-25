@@ -44,10 +44,10 @@ class NotificationHelper(
 
             val alertChannel = NotificationChannel(
                 CHANNEL_ID_DISAPPOINTMENT,
-                "親からの呆れメッセージ警告",
+                "おかんからの注意通知",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "使いすぎ時に届く段階的な呆れメッセージ通知"
+                description = "使いすぎ時に届くおかんの小言・警告通知"
                 enableVibration(true)
                 setShowBadge(true)
             }
@@ -72,7 +72,7 @@ class NotificationHelper(
         )
 
         return NotificationCompat.Builder(context, CHANNEL_ID_MONITORING)
-            .setContentTitle("親の呆れ顔ガード稼働中")
+            .setContentTitle("おかんが見守り中")
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
@@ -83,7 +83,7 @@ class NotificationHelper(
     }
 
     /**
-     * 段階的呆れメッセージのローカル通知を送信
+     * おかんからの通知を送信（感情タグなどは含めず、セリフそのものがダイレクトに見える設計）
      */
     fun showDisappointmentNotification(
         message: DisappointmentMessage,
@@ -101,9 +101,9 @@ class NotificationHelper(
         )
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_DISAPPOINTMENT)
-            .setContentTitle("【${message.level.title}】 $appName")
-            .setContentText(message.mainQuote)
-            .setStyle(NotificationCompat.BigTextStyle().bigText("${message.mainQuote}\n${message.subQuote}"))
+            .setContentTitle(message.mainQuote)
+            .setContentText(message.subQuote)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("${message.mainQuote}\n\n${message.subQuote}"))
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
@@ -124,7 +124,7 @@ class NotificationHelper(
     }
 
     /**
-     * 嫌がらせ・警告用バイブレーションの発火
+     * 警告用バイブレーションの発火
      */
     fun triggerVibration() {
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -137,7 +137,6 @@ class NotificationHelper(
 
         vibrator?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // ため息・チクチクとした短い連続振動パターン
                 val timings = longArrayOf(0, 150, 100, 250, 150, 400)
                 val amplitudes = intArrayOf(0, 180, 0, 220, 0, 255)
                 val effect = VibrationEffect.createWaveform(timings, amplitudes, -1)

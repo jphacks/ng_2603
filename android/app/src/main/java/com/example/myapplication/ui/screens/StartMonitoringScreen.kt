@@ -3,6 +3,7 @@ package com.example.myapplication.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,15 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -43,6 +40,7 @@ import com.example.myapplication.ui.model.MonitoringMode
 import com.example.myapplication.ui.model.OkanPersonality
 import com.example.myapplication.ui.theme.OkanBackground
 import com.example.myapplication.ui.theme.OkanBorder
+import com.example.myapplication.ui.theme.OkanCardGray
 import com.example.myapplication.ui.theme.OkanPrimary
 import com.example.myapplication.ui.theme.OkanPrimaryContainer
 import com.example.myapplication.ui.theme.OkanSurface
@@ -51,12 +49,12 @@ import com.example.myapplication.ui.theme.OkanTextSecondary
 
 @Composable
 fun StartMonitoringScreen(
-    initialProhibition: String = "",
+    initialProhibition: String = "料理中にスマホいじっちゃダメ！",
     initialMinutes: Int = 30,
     initialPersonality: OkanPersonality = OkanPersonality.STANDARD,
     initialMode: MonitoringMode = MonitoringMode.AFTER_LIMIT,
     onStartMonitoringClick: (prohibition: String, minutes: Int, personality: OkanPersonality, mode: MonitoringMode) -> Unit,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit = {}
 ) {
     var prohibitionText by remember { mutableStateOf(initialProhibition) }
     var selectedHour by remember { mutableIntStateOf(initialMinutes / 60) }
@@ -71,22 +69,21 @@ fun StartMonitoringScreen(
             .fillMaxSize()
             .background(OkanBackground)
     ) {
-        // 上部バー
+        // Figmaデザイン準拠のTopBar
         OkanTopBar(
-            title = "見守り設定",
-            canNavigateBack = true,
-            onBackClick = onBackClick
+            title = "おかん通知",
+            canNavigateBack = false
         )
 
-        // スクロール可能な全体領域
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
                 .padding(horizontal = 24.dp)
         ) {
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
+            // 大見出し
             Text(
                 text = "見守り開始設定",
                 fontSize = 24.sp,
@@ -94,75 +91,36 @@ fun StartMonitoringScreen(
                 color = OkanTextPrimary
             )
 
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // 見守り方式のタブ分け（経過後に始めるのか / その期間見守ってもらうのか）
-            Text(
-                text = "見守りモード",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = OkanTextPrimary
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .border(1.dp, OkanBorder, RoundedCornerShape(14.dp))
-                    .background(OkanSurface)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                MonitoringMode.values().forEach { mode ->
-                    val isSelected = selectedMode == mode
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isSelected) OkanPrimaryContainer else Color.Transparent)
-                            .clickable { selectedMode = mode }
-                    ) {
-                        Text(
-                            text = mode.label,
-                            fontSize = 14.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) OkanPrimary else OkanTextPrimary
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = selectedMode.description,
-                fontSize = 11.sp,
-                color = OkanTextSecondary,
-                modifier = Modifier.padding(start = 4.dp)
-            )
-
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 項目1: 今から何をするの?（初期文なし、すぐ入力可能）
+            // 項目1: あなたに今やって欲しくないことは何？
             Text(
-                text = "今から何をするの?",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
+                text = "あなたに今やって欲しくないことは何？",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
                 color = OkanTextPrimary
             )
+
             Spacer(modifier = Modifier.height(8.dp))
+
+            // 入力エリア
             OutlinedTextField(
                 value = prohibitionText,
                 onValueChange = { prohibitionText = it },
-                placeholder = { Text("例: 勉強、読書、料理、仕事など") },
+                placeholder = {
+                    Text(
+                        text = "料理中にスマホいじっちゃダメ！",
+                        fontSize = 13.sp,
+                        color = OkanTextSecondary.copy(alpha = 0.6f)
+                    )
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(80.dp),
+                    .height(78.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = OkanPrimary,
-                    unfocusedBorderColor = OkanBorder,
+                    focusedBorderColor = OkanPrimary.copy(alpha = 0.5f),
+                    unfocusedBorderColor = Color.Transparent,
                     focusedContainerColor = OkanSurface,
                     unfocusedContainerColor = OkanSurface
                 ),
@@ -172,35 +130,24 @@ fun StartMonitoringScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 項目2: 制限時間セット（ドラムロール・ダイヤル式、0分可能）
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "制限時間セット",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = OkanTextPrimary
-                )
-                Text(
-                    text = "合計: ${selectedHour * 60 + selectedMinute}分",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OkanPrimary
-                )
-            }
+            // 項目2: 制限時間セット（ドラムロール・ダイヤル式）
+            Text(
+                text = "制限時間セット",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = OkanTextPrimary
+            )
+
             Spacer(modifier = Modifier.height(8.dp))
 
+            // ドラムロールカード（白背景・Figma通りのカード）
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, OkanBorder, RoundedCornerShape(16.dp))
                     .background(OkanSurface)
-                    .padding(vertical = 10.dp)
+                    .padding(vertical = 12.dp)
             ) {
                 DialTimePicker(
                     selectedHour = selectedHour,
@@ -217,18 +164,18 @@ fun StartMonitoringScreen(
             // 項目3: おかんのタイプ（性格）
             Text(
                 text = "おかんのタイプ（性格）",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
                 color = OkanTextPrimary
             )
+
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 3つのセグメントボタン
+            // 3連セグメントボタン
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .border(1.dp, OkanBorder, RoundedCornerShape(14.dp))
                     .background(OkanSurface)
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -239,55 +186,50 @@ fun StartMonitoringScreen(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp)
+                            .height(42.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (isSelected) OkanPrimaryContainer else Color.Transparent)
-                            .clickable { selectedPersonality = personality }
+                            .then(
+                                if (isSelected) {
+                                    Modifier.border(1.dp, OkanBorder, RoundedCornerShape(10.dp))
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                selectedPersonality = personality
+                            }
                     ) {
                         Text(
                             text = personality.label,
                             fontSize = 14.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) OkanPrimary else OkanTextPrimary
+                            color = OkanTextPrimary
                         )
                     }
                 }
             }
 
-            // おかんタイプの説明文（小さな余白に小さい文字で表示）
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = selectedPersonality.description,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = OkanTextSecondary,
-                modifier = Modifier.padding(horizontal = 6.dp)
-            )
+            Spacer(modifier = Modifier.height(32.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // 見守り開始ボタン（0分も可能、coerceAtLeast(0)）
+            // 見守り開始ボタン
             Button(
                 onClick = {
-                    val totalMinutes = (selectedHour * 60 + selectedMinute).coerceAtLeast(0)
-                    val effectiveProhibition = if (prohibitionText.isBlank()) "指定なし" else prohibitionText
-                    onStartMonitoringClick(effectiveProhibition, totalMinutes, selectedPersonality, selectedMode)
+                    val totalMinutes = selectedHour * 60 + selectedMinute
+                    onStartMonitoringClick(prohibitionText, totalMinutes, selectedPersonality, selectedMode)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = OkanPrimary,
-                    contentColor = Color.White
+                    containerColor = OkanCardGray,
+                    contentColor = OkanTextPrimary
                 )
             ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.size(8.dp))
                 Text(
                     text = "見守り開始",
                     fontSize = 18.sp,
@@ -295,7 +237,7 @@ fun StartMonitoringScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(36.dp))
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
