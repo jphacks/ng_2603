@@ -181,8 +181,8 @@ class AppMonitoringService : Service() {
                     val isLimitExceeded = (startTime > 0 && elapsed >= limitMillis)
                     val limitMinutes = (limitMillis / (60 * 1000)).toInt()
 
-                    // 「時間内使用で通知」モードの場合は高速検知
-                    if (mode == "DURING_LIMIT") {
+                    // 「時間内使用で通知」モードまたは設定時間超過時は高速検知
+                    if (mode == "DURING_LIMIT" || isLimitExceeded) {
                         loopDelay = 800L
                     }
 
@@ -222,10 +222,10 @@ class AppMonitoringService : Service() {
 
                         if (shouldNotifyThisApp) {
                             // 通知間隔の制御
-                            // - 設定時間が過ぎたら次から次へと10秒おきに通知
+                            // - 設定時間が過ぎたら次から次へと2秒間隔で通知
                             // - 「時間内使用で通知」モードの場合: 触っていたら即時通知 & 数秒おきに連続通知
                             val intervalMillis = if (isLimitExceeded) {
-                                10000L // 設定時間が過ぎたら10秒おきに通知
+                                2000L // 設定時間が過ぎたら2秒間隔で通知
                             } else if (mode == "DURING_LIMIT") {
                                 when {
                                     currentViolationCount <= 1 -> 5000L
@@ -233,7 +233,7 @@ class AppMonitoringService : Service() {
                                     else -> 3000L
                                 }
                             } else {
-                                10000L
+                                2000L
                             }
 
                             val shouldNotify = (currentForegroundApp != lastNotifiedPackage) ||
