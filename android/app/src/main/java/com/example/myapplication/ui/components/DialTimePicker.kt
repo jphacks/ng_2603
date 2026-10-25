@@ -51,10 +51,10 @@ import kotlinx.coroutines.launch
 
 /**
  * 制限時間セット用のダイヤルピッカー
- * - 0未満には絶対に下がらない（最小値0で停止）
- * - 上ボタンで増加、下ボタンで減少
- * - 「2時間」ボタンを削除（15分, 30分, 45分, 1時間）
- * - スクロールとボタン操作が安定して連動
+ * - 上ボタン（^）: 数字を減らす（0で下限停止）
+ * - 下ボタン（v）: 数字を増やす
+ * - 0未満には絶対に下がらない
+ * - 「2時間」ボタンなし（15分, 30分, 45分, 1時間）
  */
 @Composable
 fun DialTimePicker(
@@ -79,6 +79,7 @@ fun DialTimePicker(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 時間ダイヤル (0〜23時間)
+            // 上向き矢印（^）は数字を減らし、下向き矢印（v）は数字を増やす
             WheelDialColumn(
                 label = "時間",
                 values = hours,
@@ -86,16 +87,18 @@ fun DialTimePicker(
                 onValueSelected = { newHour ->
                     onTimeChanged(newHour, selectedMinute)
                 },
-                canStepUp = selectedHour < 23,
-                canStepDown = selectedHour > 0,
+                canStepUp = selectedHour > 0, // 0より大きいとき減らせる
+                canStepDown = selectedHour < 23, // 23未満のとき増やせる
                 onStepUp = {
-                    if (selectedHour < 23) {
-                        onTimeChanged(selectedHour + 1, selectedMinute)
+                    // 上向き: 数字を減らす
+                    if (selectedHour > 0) {
+                        onTimeChanged(selectedHour - 1, selectedMinute)
                     }
                 },
                 onStepDown = {
-                    if (selectedHour > 0) {
-                        onTimeChanged(selectedHour - 1, selectedMinute)
+                    // 下向き: 数字を増やす
+                    if (selectedHour < 23) {
+                        onTimeChanged(selectedHour + 1, selectedMinute)
                     }
                 }
             )
@@ -114,6 +117,7 @@ fun DialTimePicker(
             }
 
             // 分ダイヤル (00〜55分、5分刻み)
+            // 上向き矢印（^）は数字を減らし、下向き矢印（v）は数字を増やす
             WheelDialColumn(
                 label = "分",
                 values = minutes,
@@ -121,17 +125,19 @@ fun DialTimePicker(
                 onValueSelected = { newMin ->
                     onTimeChanged(selectedHour, newMin)
                 },
-                canStepUp = selectedMinute < 55,
-                canStepDown = selectedMinute > 0, // 0のときはそれ以上減らせない
+                canStepUp = selectedMinute > 0, // 0より大きいとき減らせる
+                canStepDown = selectedMinute < 55, // 55未満のとき増やせる
                 onStepUp = {
-                    if (selectedMinute < 55) {
-                        val newMin = (selectedMinute + 5).coerceAtMost(55)
+                    // 上向き: 数字を減らす
+                    if (selectedMinute > 0) {
+                        val newMin = (selectedMinute - 5).coerceAtLeast(0)
                         onTimeChanged(selectedHour, newMin)
                     }
                 },
                 onStepDown = {
-                    if (selectedMinute > 0) {
-                        val newMin = (selectedMinute - 5).coerceAtLeast(0)
+                    // 下向き: 数字を増やす
+                    if (selectedMinute < 55) {
+                        val newMin = (selectedMinute + 5).coerceAtMost(55)
                         onTimeChanged(selectedHour, newMin)
                     }
                 }
@@ -140,7 +146,7 @@ fun DialTimePicker(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // クイック選択チップ（※「2時間」ボタンは削除）
+        // クイック選択チップ
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.padding(horizontal = 16.dp)
@@ -198,7 +204,6 @@ private fun WheelDialColumn(
     val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
     val coroutineScope = rememberCoroutineScope()
 
-    // 外部（チップや上下ボタン）からの変更時にスクロールを同期
     LaunchedEffect(selectedValue) {
         val idx = values.indexOf(selectedValue)
         if (idx in values.indices && !listState.isScrollInProgress) {
@@ -208,7 +213,6 @@ private fun WheelDialColumn(
         }
     }
 
-    // スクロール停止時に選択値を確定（0未満や最大超過なし）
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
             .filter { !it }
@@ -225,7 +229,7 @@ private fun WheelDialColumn(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
     ) {
-        // 上ボタン（▲）: 数値を増やす (+1/+5)
+        // 上ボタン（▲ / ^）: 数値を減らす（0で停止）
         IconButton(
             onClick = onStepUp,
             enabled = canStepUp,
@@ -233,7 +237,7 @@ private fun WheelDialColumn(
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowUp,
-                contentDescription = "$label を増やす",
+                contentDescription = "$label を減らす",
                 tint = if (canStepUp) OkanTextPrimary else OkanTextSecondary.copy(alpha = 0.25f),
                 modifier = Modifier.size(24.dp)
             )
@@ -295,7 +299,7 @@ private fun WheelDialColumn(
             }
         }
 
-        // 下ボタン（▼）: 数値を減らす (-1/-5)（0で停止）
+        // 下ボタン（▼ / v）: 数値を増やす
         IconButton(
             onClick = onStepDown,
             enabled = canStepDown,
@@ -303,7 +307,7 @@ private fun WheelDialColumn(
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "$label を減らす",
+                contentDescription = "$label を増やす",
                 tint = if (canStepDown) OkanTextPrimary else OkanTextSecondary.copy(alpha = 0.25f),
                 modifier = Modifier.size(24.dp)
             )

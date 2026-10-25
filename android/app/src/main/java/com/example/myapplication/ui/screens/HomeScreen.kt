@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
@@ -24,7 +26,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -40,10 +42,10 @@ import androidx.compose.ui.unit.sp
 import com.example.myapplication.R
 import com.example.myapplication.data.repository.ScreenTimeRepositoryImpl
 import com.example.myapplication.data.repository.SettingsRepositoryImpl
-import com.example.myapplication.domain.model.AvatarExpression
-import com.example.myapplication.domain.model.DisappointmentLevel
+import com.example.myapplication.domain.model.AppUsageInfo
+import com.example.myapplication.domain.repository.HourlyScreenTime
 import com.example.myapplication.ui.components.OkanTopBar
-import com.example.myapplication.ui.disappointment.components.ParentAvatarView
+import com.example.myapplication.ui.disappointment.components.ScreenTimeCard
 import com.example.myapplication.ui.model.UserRole
 import com.example.myapplication.ui.theme.OkanBackground
 import com.example.myapplication.ui.theme.OkanCardGray
@@ -53,6 +55,7 @@ import com.example.myapplication.ui.theme.OkanPrimaryContainer
 import com.example.myapplication.ui.theme.OkanSurface
 import com.example.myapplication.ui.theme.OkanTextPrimary
 import com.example.myapplication.ui.theme.OkanTextSecondary
+import kotlinx.coroutines.flow.first
 
 @Composable
 fun HomeScreen(
@@ -68,17 +71,27 @@ fun HomeScreen(
     val screenTimeRepo = remember { ScreenTimeRepositoryImpl(context, settingsRepo) }
 
     var showStopDialog by remember { mutableStateOf(false) }
-    var todayScreenTimeMillis by remember { mutableLongStateOf(0L) }
 
-    // 本日のスクリーンタイム取得
+    // スクリーンタイム測定データ
+    var appUsageList by remember { mutableStateOf<List<AppUsageInfo>>(emptyList()) }
+    var hourlyData by remember { mutableStateOf<List<HourlyScreenTime>>(emptyList()) }
+    var ignoredCount by remember { mutableIntStateOf(0) }
+    var distractionMins by remember { mutableIntStateOf(0) }
+
+    val scrollState = rememberScrollState()
+
+    // 実際のスクリーンタイム・1時間ごと推移・無視回数・他事時間を測定・集計
     LaunchedEffect(Unit) {
-        val list = screenTimeRepo.getTodayAppUsageList()
-        val total = list.sumOf { it.usedTimeMillis }
-        todayScreenTimeMillis = total
-    }
+        val apps = screenTimeRepo.getTodayAppUsageList()
+        val hourly = screenTimeRepo.getHourlyScreenTime()
+        val count = settingsRepo.violationCountFlow.first()
+        val totalDistract = hourly.sumOf { it.distractionMinutes }
 
-    val screenTimeHours = todayScreenTimeMillis / (1000 * 60 * 60)
-    val screenTimeMinutes = (todayScreenTimeMillis % (1000 * 60 * 60)) / (1000 * 60)
+        appUsageList = apps
+        hourlyData = hourly
+        ignoredCount = count
+        distractionMins = totalDistract
+    }
 
     Column(
         modifier = Modifier
@@ -98,11 +111,12 @@ fun HomeScreen(
         )
 
         if (!isMonitoring) {
-            // 通常の待機状態ホーム（親 or 個人管理）
+            // 「見守り待機中」画面は廃止し、スクリーンタイム画面（縦積み棒グラフ & 指標集計）を直接表示
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 24.dp)
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 20.dp)
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -112,8 +126,8 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "ホーム",
-                        fontSize = 26.sp,
+                        text = "スクリーンタイム",
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         color = OkanTextPrimary
                     )
@@ -134,71 +148,17 @@ fun HomeScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // 中央の大きな状態カード（待機中 ＆ スクリーンタイム表示）
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(OkanCardGray)
-                        .padding(20.dp)
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        // 親アバタープレビュー
-                        ParentAvatarView(
-                            expression = AvatarExpression.SMILE,
-                            level = DisappointmentLevel.LEVEL_0_SERENE,
-                            modifier = Modifier.size(115.dp)
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Text(
-                            text = "見守り待機中",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = OkanTextPrimary
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // スクリーンタイム表示バッジ
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(OkanSurface)
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = "今日のスクリーンタイム: ${screenTimeHours}時間${screenTimeMinutes}分",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = OkanPrimary
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Text(
-                            text = if (userRole == UserRole.PARENT) {
-                                "連携端末: お子様のスマホと連携中"
-                            } else {
-                                "使いすぎると親がだんだん呆れていきます。\n準備ができたら見守りを開始しましょう！"
-                            },
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Normal,
-                            color = OkanTextSecondary,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 17.sp
-                        )
-                    }
-                }
+                // スクリーンタイム詳細カード
+                // ・実際のスクリーンタイムを測定し、1時間ごとの縦積み棒グラフ（Canvas描画）を表示
+                // ・通知を無視した回数、見守り時間内の他事（余計なアプリ起動）時間を集計表示
+                ScreenTimeCard(
+                    apps = appUsageList,
+                    hourlyData = hourlyData,
+                    ignoredNotificationCount = ignoredCount,
+                    totalDistractionMinutes = distractionMins
+                )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -221,13 +181,13 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(
-                        text = "見守り開始準備",
+                        text = "見守り開始設定へ",
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(30.dp))
             }
         } else {
             // 見守り実行中 / 警告状態
@@ -235,6 +195,7 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(scrollState)
                     .padding(horizontal = 24.dp)
             ) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -264,7 +225,7 @@ fun HomeScreen(
                 Image(
                     painter = painterResource(id = R.drawable.okan_angry),
                     contentDescription = "怒るお母さん",
-                    modifier = Modifier.size(210.dp)
+                    modifier = Modifier.size(200.dp)
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -301,7 +262,6 @@ fun HomeScreen(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
                         .clip(RoundedCornerShape(18.dp))
                         .background(OkanCardGray)
                         .padding(vertical = 16.dp, horizontal = 20.dp)
@@ -326,11 +286,11 @@ fun HomeScreen(
                             } else {
                                 "余計なアプリ見ちゃ\nだめよ！！"
                             },
-                            fontSize = 20.sp,
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = OkanTextPrimary,
                             textAlign = TextAlign.Center,
-                            lineHeight = 28.sp
+                            lineHeight = 26.sp
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -344,7 +304,7 @@ fun HomeScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
